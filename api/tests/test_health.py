@@ -1,4 +1,9 @@
+import os
+
 from fastapi.testclient import TestClient
+
+os.environ["MTOS_REPOSITORY_MODE"] = "in_memory"
+os.environ["MTOS_TRUST_DEMO_HEADERS"] = "true"
 
 from app.main import app
 
@@ -30,6 +35,30 @@ def test_account_manager_only_sees_assigned_clients() -> None:
     payload = response.json()
     assert len(payload) == 1
     assert payload[0]["owner"] == "Mila Grant"
+
+
+def test_account_manager_can_view_assigned_client_workspace() -> None:
+    response = client.get("/api/v1/clients/client_2", headers=account_manager_headers)
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["client"]["name"] == "Northwind Legal"
+    assert payload["client"]["owner"] == "Mila Grant"
+    assert payload["visibilityScope"].startswith("Ownership filtering")
+
+
+def test_account_manager_cannot_view_unassigned_client_workspace() -> None:
+    response = client.get("/api/v1/clients/client_1", headers=account_manager_headers)
+    assert response.status_code == 404
+
+
+def test_account_manager_can_sync_visible_client_intelligence() -> None:
+    response = client.post("/api/v1/clients/client_2/intelligence/sync", headers=account_manager_headers)
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["source"] == "ClickUp"
+    assert payload["syncedAt"]
 
 
 def test_ownership_exceptions_require_admin_access() -> None:

@@ -5,7 +5,12 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { fetchOwnershipExceptions, fetchOwnershipSyncSummary, runOwnershipSync } from "@/lib/api";
+import {
+  fetchClickUpIntegrationStatus,
+  fetchOwnershipExceptions,
+  fetchOwnershipSyncSummary,
+  runOwnershipSync,
+} from "@/lib/api";
 import { useAppStore } from "@/store/app-store";
 
 export function OwnershipSyncPanel() {
@@ -25,6 +30,12 @@ export function OwnershipSyncPanel() {
     enabled: isAdmin,
   });
 
+  const clickupStatusQuery = useQuery({
+    queryKey: ["clickup-status"],
+    queryFn: fetchClickUpIntegrationStatus,
+    enabled: isAdmin,
+  });
+
   const syncMutation = useMutation({
     mutationFn: runOwnershipSync,
     onSuccess: () => {
@@ -34,7 +45,11 @@ export function OwnershipSyncPanel() {
       void queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] });
       void queryClient.invalidateQueries({ queryKey: ["clients"] });
     },
-    onError: () => {
+    onError: (error) => {
+      if (error instanceof Error && error.message) {
+        toast.error(error.message);
+        return;
+      }
       toast.error("Ownership sync failed");
     },
   });
@@ -68,8 +83,16 @@ export function OwnershipSyncPanel() {
             <p className="mt-2 text-sm text-muted-foreground">
               Source-of-truth ownership sync runs every 15 minutes and controls MTOS client visibility.
             </p>
+            {clickupStatusQuery.data ? (
+              <p className="mt-3 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                {clickupStatusQuery.data.configured ? "ClickUp connected" : "ClickUp not configured"}
+              </p>
+            ) : null}
           </div>
-          <Button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+          <Button
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending || clickupStatusQuery.data?.configured === false}
+          >
             <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
             Run Sync
           </Button>

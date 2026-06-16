@@ -27,6 +27,7 @@ PromptStatus = Literal["Active", "Draft", "Archived"]
 ProviderName = Literal["Claude", "Gemini", "Mixed"]
 ActivityKind = Literal["brief", "sync", "risk", "qa", "recap"]
 OwnershipExceptionStatus = Literal["open", "resolved"]
+IntelligenceSyncStatus = Literal["connected", "warning", "not_found"]
 
 
 class UserProfile(CamelModel):
@@ -89,6 +90,32 @@ class DashboardOverview(CamelModel):
     activity: list[ActivityRecord]
 
 
+class ClientWorkspace(CamelModel):
+    client: ClientRecord
+    monthly_touches: list[MonthlyTouchRecord]
+    intelligence_summary: str
+    priority_actions: list[str]
+    visibility_scope: str
+    intelligence_snapshot: "ClientIntelligenceSnapshot | None" = None
+
+
+class ClientIntelligenceSnapshot(CamelModel):
+    id: str
+    source: str
+    synced_at: str
+    sync_status: IntelligenceSyncStatus
+    clickup_task_id: str | None = None
+    clickup_task_name: str | None = None
+    clickup_task_url: str | None = None
+    account_manager: str | None = None
+    task_status: str | None = None
+    task_priority: str | None = None
+    due_at: str | None = None
+    last_activity_at: str | None = None
+    summary: str
+    signals: list[str]
+
+
 class TenantContext(CamelModel):
     tenant_id: str
     tenant_name: str
@@ -121,3 +148,27 @@ class OwnershipSyncRunResult(CamelModel):
     status: Literal["completed"]
     summary: OwnershipSyncSummary
     exceptions: list[OwnershipExceptionRecord]
+
+
+class ClickUpIntegrationStatus(CamelModel):
+    configured: bool
+    base_url: str
+    team_id: str | None = None
+    list_id: str | None = None
+
+
+class RuntimeCheck(CamelModel):
+    key: str
+    label: str
+    status: Literal["ok", "warning", "error"]
+    detail: str
+
+
+class RuntimeStatus(CamelModel):
+    environment: str
+    repository_mode: str
+    trust_demo_headers: bool
+    supabase_configured: bool
+    supabase_rls_ready: bool
+    recommended_next_step: str
+    checks: list[RuntimeCheck]

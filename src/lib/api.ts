@@ -1,21 +1,28 @@
 import type {
+  ClientIntelligenceSnapshot,
   ClientRecord,
+  ClientWorkspace,
+  ClickUpIntegrationStatus,
   DashboardOverview,
   MonthlyTouchRecord,
   OwnershipExceptionRecord,
   OwnershipSyncRunResult,
   OwnershipSyncSummary,
   PromptTemplateRecord,
+  RuntimeStatus,
 } from "@/types/mtos";
 import { useAppStore } from "@/store/app-store";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
-  const actingIdentity = useAppStore.getState().actingIdentity;
+  const state = useAppStore.getState();
+  const actingIdentity = state.actingIdentity;
+  const accessToken = state.accessToken;
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       "X-MTOS-User-Id": actingIdentity.id,
       "X-MTOS-Role": actingIdentity.role,
       ...(actingIdentity.tenantUserId ? { "X-MTOS-Tenant-User-Id": actingIdentity.tenantUserId } : {}),
@@ -24,7 +31,16 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed for ${path}`);
+    let detail = "";
+    try {
+      const payload = (await response.json()) as unknown;
+      if (payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string") {
+        detail = payload.detail;
+      }
+    } catch {
+      detail = "";
+    }
+    throw new Error(detail ? `${detail}` : `Request failed for ${path}`);
   }
 
   return (await response.json()) as T;
@@ -36,6 +52,16 @@ export function fetchDashboardOverview() {
 
 export function fetchClients() {
   return requestJson<ClientRecord[]>("/api/v1/clients");
+}
+
+export function fetchClientWorkspace(clientId: string) {
+  return requestJson<ClientWorkspace>(`/api/v1/clients/${clientId}`);
+}
+
+export function syncClientIntelligence(clientId: string) {
+  return requestJson<ClientIntelligenceSnapshot>(`/api/v1/clients/${clientId}/intelligence/sync`, {
+    method: "POST",
+  });
 }
 
 export function fetchMonthlyTouches() {
@@ -58,4 +84,12 @@ export function runOwnershipSync() {
   return requestJson<OwnershipSyncRunResult>("/api/v1/ownership/sync", {
     method: "POST",
   });
+}
+
+export function fetchClickUpIntegrationStatus() {
+  return requestJson<ClickUpIntegrationStatus>("/api/v1/integrations/clickup/status");
+}
+
+export function fetchRuntimeStatus() {
+  return requestJson<RuntimeStatus>("/api/v1/runtime-status");
 }

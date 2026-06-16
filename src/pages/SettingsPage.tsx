@@ -1,4 +1,5 @@
 import { OwnershipSyncPanel } from "@/components/settings/ownership-sync-panel";
+import { RuntimeStatusPanel } from "@/components/settings/runtime-status-panel";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 
@@ -20,6 +21,8 @@ export default function SettingsPage() {
           controls.
         </p>
       </Card>
+
+      <RuntimeStatusPanel />
 
       <OwnershipSyncPanel />
 

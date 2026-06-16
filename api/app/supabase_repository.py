@@ -1,7 +1,12 @@
+import httpx
 from fastapi import HTTPException, status
 
+from app.config import settings
+from app.integrations.clickup import ClickUpClient
 from app.models import (
+    ClientIntelligenceSnapshot,
     ClientRecord,
+    ClientWorkspace,
     DashboardOverview,
     MonthlyTouchRecord,
     OwnershipExceptionRecord,
@@ -11,6 +16,8 @@ from app.models import (
     TenantContext,
     UserProfile,
 )
+from app.services.client_intelligence_sync import ClientIntelligenceSyncConfig, ClientIntelligenceSyncService
+from app.services.ownership_sync import OwnershipSyncConfig, OwnershipSyncService
 from app.supabase_http import SupabaseHTTP
 
 
@@ -36,7 +43,7 @@ class SupabaseMTOSRepository:
         if not user_id and not role_override:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authenticated user context")
 
-        http = self._http(context_token=None)
+        http = self._http(None)
         if tenant_user_id_override:
             membership = http.get(
                 "tenant_users",
@@ -241,6 +248,57 @@ class SupabaseMTOSRepository:
             for touch in touches
         ]
 
+    def get_client_workspace(self, context: TenantContext, client_id: str) -> ClientWorkspace:
+        client = next((item for item in self.list_clients(context) if item.id == client_id), None)
+        if client is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+        http = self._http(context.auth_token)
+        touches = http.get(
+            "monthly_touches",
+            params={
+                "select": "id,scheduled_at,stage,client_id",
+                "tenant_id": f"eq.{context.tenant_id}",
+                "client_id": f"eq.{client_id}",
+                "order": "scheduled_at.desc",
+                "limit": "8",
+            },
+        )
+
+        monthly_touches = [
+            MonthlyTouchRecord(
+                id=touch["id"],
+                client_name=client.name,
+                scheduled_at=str(touch["scheduled_at"]),
+                stage=touch.get("stage") or "Meeting Scheduled",
+                owner=client.owner,
+            )
+            for touch in touches
+        ]
+        visibility_scope = (
+            "Admin visibility includes all clients in the tenant."
+            if context.current_user.role == "admin"
+            else "Ownership filtering limits this workspace to your assigned clients."
+        )
+        snapshot = self._latest_client_intelligence_snapshot(context=context, client_id=client_id)
+
+        return ClientWorkspace(
+            client=client.model_copy(),
+            monthly_touches=monthly_touches,
+            intelligence_summary=(
+                f"{client.name} is currently rated {client.risk_level.lower()} risk with "
+                f"a health score of {client.health_score}/100. The strongest visible expansion angle is "
+                f"{client.top_opportunity.lower()}."
+            ),
+            priority_actions=[
+                f"Prepare the next Monthly Touch scheduled for {client.next_touch_at}.",
+                f"Validate owner follow-through for the {client.top_opportunity.lower()} opportunity.",
+                "Review open risks and confirm whether escalation or recap follow-up is needed.",
+            ],
+            visibility_scope=visibility_scope,
+            intelligence_snapshot=snapshot,
+        )
+
     def list_prompts(self) -> list[PromptTemplateRecord]:
         http = self._http(None)
         templates = http.get(
@@ -265,6 +323,7 @@ class SupabaseMTOSRepository:
         ]
 
     def get_ownership_sync_summary(self, context: TenantContext) -> OwnershipSyncSummary:
+        self._assert_admin(context)
         http = self._http(context.auth_token)
         runs = http.get(
             "ownership_sync_runs",
@@ -300,6 +359,7 @@ class SupabaseMTOSRepository:
         )
 
     def list_ownership_exceptions(self, context: TenantContext) -> list[OwnershipExceptionRecord]:
+        self._assert_admin(context)
         http = self._http(context.auth_token)
         rows = http.get(
             "ownership_sync_exceptions",
@@ -308,6 +368,7 @@ class SupabaseMTOSRepository:
                 "tenant_id": f"eq.{context.tenant_id}",
                 "status": "eq.open",
                 "order": "last_seen_at.desc",
+                "limit": "50",
             },
         )
 
@@ -325,30 +386,124 @@ class SupabaseMTOSRepository:
         ]
 
     def run_ownership_sync(self, context: TenantContext) -> OwnershipSyncRunResult:
+        self._assert_admin(context)
+        if not settings.clickup_api_token or not settings.clickup_list_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ClickUp integration is not configured (missing MTOS_CLICKUP_API_TOKEN or MTOS_CLICKUP_LIST_ID).",
+            )
+
         http = self._http(context.auth_token)
-        run_rows = http.post(
-            "ownership_sync_runs",
-            json_body={
-                "tenant_id": context.tenant_id,
-                "provider": "ClickUp",
-                "source": "Client Health Tracker",
-                "cadence_minutes": 15,
-                "matched_clients": 0,
-                "unmatched_clients": 0,
-                "status": "completed",
-            },
+        clickup = ClickUpClient(
+            api_token=settings.clickup_api_token,
+            base_url=settings.clickup_base_url,
         )
+        sync = OwnershipSyncService(
+            http=http,
+            clickup=clickup,
+            config=OwnershipSyncConfig(
+                clickup_list_id=settings.clickup_list_id,
+                clickup_am_custom_field_id=settings.clickup_am_custom_field_id,
+                clickup_include_closed=settings.clickup_include_closed,
+                clickup_max_pages=settings.clickup_max_pages,
+                clickup_max_tasks=settings.clickup_max_tasks,
+            ),
+        )
+        sync.run(tenant_id=context.tenant_id)
 
         summary = self.get_ownership_sync_summary(context)
-        exceptions = self.list_ownership_exceptions(context)
+        return OwnershipSyncRunResult(status="completed", summary=summary, exceptions=[])
 
-        if run_rows:
-            summary = summary.model_copy(update={"last_run_at": str(run_rows[0].get("started_at") or summary.last_run_at)})
+    def sync_client_intelligence(self, context: TenantContext, client_id: str) -> ClientIntelligenceSnapshot:
+        if not settings.clickup_api_token or not settings.clickup_list_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ClickUp integration is not configured (missing MTOS_CLICKUP_API_TOKEN or MTOS_CLICKUP_LIST_ID).",
+            )
 
-        return OwnershipSyncRunResult(status="completed", summary=summary, exceptions=exceptions)
+        client_row = self._client_row_for_context(context=context, client_id=client_id)
+        sync = ClientIntelligenceSyncService(
+            http=self._http(None),
+            clickup=ClickUpClient(
+                api_token=settings.clickup_api_token,
+                base_url=settings.clickup_base_url,
+            ),
+            config=ClientIntelligenceSyncConfig(
+                clickup_list_id=settings.clickup_list_id,
+                clickup_am_custom_field_id=settings.clickup_am_custom_field_id,
+                clickup_include_closed=settings.clickup_include_closed,
+                clickup_max_pages=settings.clickup_max_pages,
+                clickup_max_tasks=settings.clickup_max_tasks,
+            ),
+        )
+        return sync.sync_client(tenant_id=context.tenant_id, client_row=client_row)
 
     def _http(self, auth_token: str | None) -> SupabaseHTTP:
         if auth_token and self._supabase_anon_key:
             return SupabaseHTTP(self._supabase_url, apikey=self._supabase_anon_key, auth_bearer=auth_token)
         return SupabaseHTTP(self._supabase_url, apikey=self._supabase_service_role_key)
+
+    def _client_row_for_context(self, context: TenantContext, client_id: str) -> dict[str, str]:
+        client = next((item for item in self.list_clients(context) if item.id == client_id), None)
+        if client is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+        rows = self._http(None).get(
+            "clients",
+            params={
+                "select": "id,name,external_ref",
+                "tenant_id": f"eq.{context.tenant_id}",
+                "id": f"eq.{client_id}",
+                "limit": "1",
+            },
+        )
+        if not rows:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+        return rows[0]
+
+    def _latest_client_intelligence_snapshot(
+        self, context: TenantContext, client_id: str
+    ) -> ClientIntelligenceSnapshot | None:
+        try:
+            rows = self._http(None).get(
+                "client_intelligence_snapshots",
+                params={
+                    "select": "id,source,sync_status,clickup_task_id,clickup_task_name,clickup_task_url,account_manager,task_status,task_priority,due_at,last_activity_at,summary,signals_json,synced_at",
+                    "tenant_id": f"eq.{context.tenant_id}",
+                    "client_id": f"eq.{client_id}",
+                    "source": "eq.clickup",
+                    "order": "synced_at.desc",
+                    "limit": "1",
+                },
+            )
+        except httpx.HTTPStatusError:
+            return None
+        if not rows:
+            return None
+
+        row = rows[0]
+        return ClientIntelligenceSnapshot(
+            id=str(row["id"]),
+            source=str(row.get("source") or "clickup").title(),
+            synced_at=str(row.get("synced_at") or ""),
+            sync_status=str(row.get("sync_status") or "not_found"),
+            clickup_task_id=str(row.get("clickup_task_id")) if row.get("clickup_task_id") else None,
+            clickup_task_name=str(row.get("clickup_task_name")) if row.get("clickup_task_name") else None,
+            clickup_task_url=str(row.get("clickup_task_url")) if row.get("clickup_task_url") else None,
+            account_manager=str(row.get("account_manager")) if row.get("account_manager") else None,
+            task_status=str(row.get("task_status")) if row.get("task_status") else None,
+            task_priority=str(row.get("task_priority")).title() if row.get("task_priority") else None,
+            due_at=str(row.get("due_at")) if row.get("due_at") else None,
+            last_activity_at=str(row.get("last_activity_at")) if row.get("last_activity_at") else None,
+            summary=str(row.get("summary") or ""),
+            signals=[str(item) for item in list(row.get("signals_json") or []) if str(item).strip()],
+        )
+
+    @staticmethod
+    def _assert_admin(context: TenantContext) -> None:
+        if context.current_user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access is required for ownership sync administration",
+            )
 

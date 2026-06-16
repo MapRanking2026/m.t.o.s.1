@@ -5,7 +5,9 @@ from fastapi import HTTPException, status
 
 from app.models import (
     ActivityRecord,
+    ClientIntelligenceSnapshot,
     ClientRecord,
+    ClientWorkspace,
     DashboardOverview,
     MetricCard,
     MonthlyTouchRecord,
@@ -195,6 +197,49 @@ class InMemoryMTOSRepository:
             unmatched_clients=3,
             exception_count=len(self._exceptions),
         )
+        self._intelligence_snapshots = {
+            "client_1": ClientIntelligenceSnapshot(
+                id="snapshot_1",
+                source="ClickUp",
+                synced_at="2026-06-16T09:00:00Z",
+                sync_status="connected",
+                clickup_task_id="task_1",
+                clickup_task_name="BluePeak Dental",
+                clickup_task_url="https://app.clickup.com/t/task_1",
+                account_manager="Ariana Cole",
+                task_status="on track",
+                task_priority="High",
+                due_at="2026-06-18T16:00:00Z",
+                last_activity_at="2026-06-16T08:45:00Z",
+                summary="Matched ClickUp tracker row 'BluePeak Dental'. Status: on track. Priority: high. Account manager: Ariana Cole.",
+                signals=[
+                    "Account Manager: Ariana Cole",
+                    "Tracker status: on track",
+                    "Priority: High",
+                    "Client health: 84",
+                ],
+            ),
+            "client_2": ClientIntelligenceSnapshot(
+                id="snapshot_2",
+                source="ClickUp",
+                synced_at="2026-06-16T09:05:00Z",
+                sync_status="warning",
+                clickup_task_id="task_2",
+                clickup_task_name="Northwind Legal",
+                clickup_task_url="https://app.clickup.com/t/task_2",
+                account_manager=None,
+                task_status="needs review",
+                task_priority="Urgent",
+                due_at=None,
+                last_activity_at="2026-06-16T08:50:00Z",
+                summary="Matched ClickUp tracker row 'Northwind Legal'. Status: needs review. Priority: urgent. Account manager is missing from the tracker row.",
+                signals=[
+                    "Tracker status: needs review",
+                    "Priority: Urgent",
+                    "Lead quality: Needs review",
+                ],
+            ),
+        }
 
     def build_context(
         self,
@@ -271,6 +316,71 @@ class InMemoryMTOSRepository:
         if context.current_user.role == "admin":
             return touches
         return [touch for touch in touches if touch.owner == context.current_user.full_name]
+
+    def get_client_workspace(self, context: TenantContext, client_id: str) -> ClientWorkspace:
+        client = next((item for item in self.list_clients(context) if item.id == client_id), None)
+        if client is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+        touches = [
+            touch.model_copy()
+            for touch in self.list_monthly_touches(context)
+            if touch.client_name == client.name
+        ]
+        visibility_scope = (
+            "Admin visibility includes all clients in the tenant."
+            if context.current_user.role == "admin"
+            else "Ownership filtering limits this workspace to your assigned clients."
+        )
+
+        return ClientWorkspace(
+            client=client.model_copy(),
+            monthly_touches=touches,
+            intelligence_summary=(
+                f"{client.name} is currently rated {client.risk_level.lower()} risk with "
+                f"a health score of {client.health_score}/100. The strongest visible expansion angle is "
+                f"{client.top_opportunity.lower()}."
+            ),
+            priority_actions=[
+                f"Prepare the next Monthly Touch scheduled for {client.next_touch_at}.",
+                f"Validate owner follow-through for the {client.top_opportunity.lower()} opportunity.",
+                "Review open risks and confirm whether escalation or recap follow-up is needed.",
+            ],
+            visibility_scope=visibility_scope,
+            intelligence_snapshot=self._intelligence_snapshots.get(client.id).model_copy()
+            if client.id in self._intelligence_snapshots
+            else None,
+        )
+
+    def sync_client_intelligence(self, context: TenantContext, client_id: str) -> ClientIntelligenceSnapshot:
+        client = next((item for item in self.list_clients(context) if item.id == client_id), None)
+        if client is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+        snapshot = self._intelligence_snapshots.get(client.id)
+        if snapshot is None:
+            snapshot = ClientIntelligenceSnapshot(
+                id=f"snapshot_{client.id}",
+                source="ClickUp",
+                synced_at="2026-06-16T09:15:00Z",
+                sync_status="not_found",
+                clickup_task_id=None,
+                clickup_task_name=None,
+                clickup_task_url=None,
+                account_manager=None,
+                task_status=None,
+                task_priority=None,
+                due_at=None,
+                last_activity_at=None,
+                summary="No ClickUp Client Health Tracker task matched this MTOS client by external_ref or normalized client name.",
+                signals=[
+                    "Verify the MTOS client external_ref matches the ClickUp task ID.",
+                    "If name fallback is required, keep the ClickUp tracker task name aligned with the MTOS client name.",
+                ],
+            )
+
+        self._intelligence_snapshots[client.id] = snapshot.model_copy(update={"synced_at": datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")})
+        return self._intelligence_snapshots[client.id].model_copy()
 
     def list_prompts(self) -> list[PromptTemplateRecord]:
         return deepcopy(self._prompt_templates)

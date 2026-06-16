@@ -2,7 +2,30 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("@/lib/supabase", () => ({
+  supabase: {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: {
+          session: {
+            access_token: "test-token",
+            user: { id: "auth_user_1" },
+          },
+        },
+      }),
+      onAuthStateChange: vi.fn().mockReturnValue({
+        data: { subscription: { unsubscribe: vi.fn() } },
+      }),
+      signOut: vi.fn().mockResolvedValue({ error: null }),
+      signInWithPassword: vi.fn().mockResolvedValue({ error: null }),
+      signInWithOAuth: vi.fn().mockResolvedValue({ error: null }),
+      resetPasswordForEmail: vi.fn().mockResolvedValue({ error: null }),
+    },
+  },
+}));
+
 import App from "@/App";
+import { AuthProvider } from "@/app/auth-provider";
 
 const dashboardOverview = {
   tenantName: "Northstar Growth",
@@ -79,7 +102,9 @@ describe("App", () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <App />
+        <AuthProvider>
+          <App />
+        </AuthProvider>
       </QueryClientProvider>,
     );
 

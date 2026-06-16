@@ -1,4 +1,5 @@
 import { ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -26,13 +27,13 @@ export function ClientHealthTable({ clients }: ClientHealthTableProps) {
 
       <div className="divide-y divide-white/10">
         {clients.map((client) => (
-          <button
+          <Link
             key={client.id}
+            to={`/clients/${client.id}`}
             className={`grid w-full grid-cols-[1.5fr_repeat(4,1fr)_auto] items-center gap-4 px-6 py-4 text-left transition hover:bg-white/[0.03] ${
               activeClientId === client.id ? "bg-white/[0.05]" : ""
             }`}
             onClick={() => setActiveClientId(client.id)}
-            type="button"
           >
             <div>
               <p className="font-medium text-white">{client.name}</p>
@@ -43,7 +44,7 @@ export function ClientHealthTable({ clients }: ClientHealthTableProps) {
             <div className="text-sm text-muted-foreground">{client.nextTouchAt}</div>
             <div className="text-sm text-muted-foreground">{client.topOpportunity}</div>
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
-          </button>
+          </Link>
         ))}
       </div>
     </Card>

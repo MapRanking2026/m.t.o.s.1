@@ -66,6 +66,39 @@ export interface DashboardOverview {
   activity: ActivityRecord[];
 }
 
+export interface ClientWorkspace {
+  client: ClientRecord;
+  monthlyTouches: MonthlyTouchRecord[];
+  intelligenceSummary: string;
+  priorityActions: string[];
+  visibilityScope: string;
+  intelligenceSnapshot: ClientIntelligenceSnapshot | null;
+}
+
+export interface ClientIntelligenceSnapshot {
+  id: string;
+  source: string;
+  syncedAt: string;
+  syncStatus: "connected" | "warning" | "not_found";
+  clickupTaskId: string | null;
+  clickupTaskName: string | null;
+  clickupTaskUrl: string | null;
+  accountManager: string | null;
+  taskStatus: string | null;
+  taskPriority: string | null;
+  dueAt: string | null;
+  lastActivityAt: string | null;
+  summary: string;
+  signals: string[];
+}
+
+export interface ClickUpIntegrationStatus {
+  configured: boolean;
+  baseUrl: string;
+  teamId: string | null;
+  listId: string | null;
+}
+
 export interface OwnershipExceptionRecord {
   id: string;
   clientName: string;
@@ -97,4 +130,21 @@ export interface DemoIdentity {
   fullName: string;
   role: UserProfile["role"];
   tenantUserId?: string | null;
+}
+
+export interface RuntimeCheck {
+  key: string;
+  label: string;
+  status: "ok" | "warning" | "error";
+  detail: string;
+}
+
+export interface RuntimeStatus {
+  environment: string;
+  repositoryMode: string;
+  trustDemoHeaders: boolean;
+  supabaseConfigured: boolean;
+  supabaseRlsReady: boolean;
+  recommendedNextStep: string;
+  checks: RuntimeCheck[];
 }

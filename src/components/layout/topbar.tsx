@@ -1,9 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Bell, Search, ShieldCheck } from "lucide-react";
+﻿import { Bell, LogOut, Search, ShieldCheck } from "lucide-react";
 
+import { useAuth } from "@/app/auth-provider";
 import { Badge } from "@/components/ui/badge";
 import { demoIdentities, useAppStore } from "@/store/app-store";
 import type { UserProfile } from "@/types/mtos";
+import { supabase } from "@/lib/supabase";
 
 interface TopbarProps {
   tenantName: string;
@@ -12,10 +14,16 @@ interface TopbarProps {
 
 export function Topbar({ tenantName, currentUser }: TopbarProps) {
   const queryClient = useQueryClient();
+  const { session } = useAuth();
   const { actingIdentity, setActingIdentity } = useAppStore();
 
   const handleIdentityChange = (identityId: string) => {
     setActingIdentity(identityId);
+    void queryClient.invalidateQueries();
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     void queryClient.invalidateQueries();
   };
 
@@ -30,22 +38,35 @@ export function Topbar({ tenantName, currentUser }: TopbarProps) {
       </div>
 
       <div className="flex flex-col gap-3 lg:items-end">
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {demoIdentities.map((identity) => (
+        {session ? (
+          <div className="flex items-center justify-end">
             <button
-              key={identity.id}
-              className={`rounded-full border px-3 py-2 text-xs transition ${
-                actingIdentity.id === identity.id
-                  ? "border-emerald-300/40 bg-emerald-300/15 text-emerald-50"
-                  : "border-white/10 bg-white/5 text-muted-foreground hover:text-white"
-              }`}
-              onClick={() => handleIdentityChange(identity.id)}
+              className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-muted-foreground transition hover:text-white"
+              onClick={handleLogout}
               type="button"
             >
-              {identity.fullName} · {identity.role === "admin" ? "Admin" : "AM"}
+              <LogOut className="h-4 w-4" />
+              Sign out
             </button>
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {demoIdentities.map((identity) => (
+              <button
+                key={identity.id}
+                className={`rounded-full border px-3 py-2 text-xs transition ${
+                  actingIdentity.id === identity.id
+                    ? "border-emerald-300/40 bg-emerald-300/15 text-emerald-50"
+                    : "border-white/10 bg-white/5 text-muted-foreground hover:text-white"
+                }`}
+                onClick={() => handleIdentityChange(identity.id)}
+                type="button"
+              >
+                {identity.fullName} · {identity.role === "admin" ? "Admin" : "AM"}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-muted-foreground">
             <Search className="h-4 w-4" />

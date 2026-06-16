@@ -1,7 +1,15 @@
 from fastapi import APIRouter, Depends
 
 from app.dependencies import get_tenant_context
-from app.models import ClientRecord, DashboardOverview, MonthlyTouchRecord, PromptTemplateRecord, TenantContext
+from app.models import (
+    ClientIntelligenceSnapshot,
+    ClientRecord,
+    ClientWorkspace,
+    DashboardOverview,
+    MonthlyTouchRecord,
+    PromptTemplateRecord,
+    TenantContext,
+)
 from app.repository_selector import get_repository
 
 
@@ -28,6 +36,18 @@ async def dashboard_overview(context: TenantContext = Depends(get_tenant_context
 @router.get("/clients", response_model=list[ClientRecord])
 async def list_clients(context: TenantContext = Depends(get_tenant_context)) -> list[ClientRecord]:
     return get_repository().list_clients(context)
+
+
+@router.get("/clients/{client_id}", response_model=ClientWorkspace)
+async def get_client_workspace(client_id: str, context: TenantContext = Depends(get_tenant_context)) -> ClientWorkspace:
+    return get_repository().get_client_workspace(context, client_id)
+
+
+@router.post("/clients/{client_id}/intelligence/sync", response_model=ClientIntelligenceSnapshot)
+async def sync_client_intelligence(
+    client_id: str, context: TenantContext = Depends(get_tenant_context)
+) -> ClientIntelligenceSnapshot:
+    return get_repository().sync_client_intelligence(context, client_id)
 
 
 @router.get("/monthly-touches", response_model=list[MonthlyTouchRecord])

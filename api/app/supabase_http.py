@@ -47,6 +47,21 @@ class SupabaseHTTP:
             params = {"on_conflict": on_conflict}
         return self.post(table=table, json_body=json_body, prefer=prefer, params=params)
 
+    def patch(
+        self,
+        table: str,
+        params: dict[str, str],
+        json_body: Any,
+        prefer: str = "return=representation",
+    ) -> list[dict[str, Any]]:
+        with self._client(prefer=prefer) as client:
+            response = client.patch(self._table_url(table), params=params, json=json_body)
+            response.raise_for_status()
+            payload = response.json()
+        if isinstance(payload, list):
+            return payload
+        return []
+
     def _client(self, prefer: str | None = None) -> httpx.Client:
         headers = {
             "apikey": self._apikey,

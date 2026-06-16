@@ -40,3 +40,13 @@ Set these in the repo root `.env.local`:
 - `VITE_DEMO_TENANT_USER_ID_AM2=44444444-4444-4444-4444-444444444444`
 
 Restart `npm run dev` after changing env vars.
+
+## 5. Verify In App
+
+Open the Settings page in MTOS and review:
+
+- Runtime Status
+- System Checks
+- Ownership Sync
+
+The runtime panel will tell you whether MTOS is still using `in_memory` mode, whether Supabase credentials are loaded, and whether the required Supabase tables are reachable through PostgREST.
