@@ -1,0 +1,61 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Syne:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 221 67% 7%;
+  --foreground: 210 40% 96%;
+  --card: 218 46% 10%;
+  --card-foreground: 210 40% 96%;
+  --popover: 221 67% 7%;
+  --popover-foreground: 210 40% 96%;
+  --primary: 166 83% 70%;
+  --primary-foreground: 221 67% 7%;
+  --secondary: 222 38% 15%;
+  --secondary-foreground: 210 40% 96%;
+  --muted: 218 33% 18%;
+  --muted-foreground: 215 20% 70%;
+  --accent: 242 73% 67%;
+  --accent-foreground: 210 40% 96%;
+  --destructive: 0 72% 54%;
+  --border: 218 28% 18%;
+  --input: 218 28% 18%;
+  --ring: 166 83% 70%;
+  --radius: 1.5rem;
+  line-height: 1.5;
+  font-weight: 400;
+  font-family: "Manrope", sans-serif;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at 20% 20%, rgba(115, 246, 214, 0.08), transparent 25%),
+      radial-gradient(circle at 80% 0%, rgba(129, 140, 248, 0.12), transparent 24%),
+      linear-gradient(180deg, rgba(6, 11, 20, 0.95), rgba(6, 11, 20, 1));
+    min-width: 320px;
+    min-height: 100vh;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: "Syne", sans-serif;
+  }
+}
