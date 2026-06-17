@@ -61,6 +61,23 @@ def test_account_manager_can_sync_visible_client_intelligence() -> None:
     assert payload["syncedAt"]
 
 
+def test_clickup_status_includes_connection_and_cursor_state() -> None:
+    sync_response = client.post("/api/v1/ownership/sync", headers=admin_headers)
+    assert sync_response.status_code == 200
+
+    intelligence_response = client.post("/api/v1/clients/client_2/intelligence/sync", headers=account_manager_headers)
+    assert intelligence_response.status_code == 200
+
+    response = client.get("/api/v1/integrations/clickup/status", headers=admin_headers)
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["configured"] is True
+    assert payload["connection"]["health"] == "connected"
+    assert payload["ownershipCursor"]["status"] == "completed"
+    assert payload["intelligenceCursor"]["status"] == "completed"
+
+
 def test_ownership_exceptions_require_admin_access() -> None:
     forbidden = client.get("/api/v1/ownership/exceptions", headers=account_manager_headers)
     assert forbidden.status_code == 403

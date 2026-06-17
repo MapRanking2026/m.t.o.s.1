@@ -28,6 +28,8 @@ ProviderName = Literal["Claude", "Gemini", "Mixed"]
 ActivityKind = Literal["brief", "sync", "risk", "qa", "recap"]
 OwnershipExceptionStatus = Literal["open", "resolved"]
 IntelligenceSyncStatus = Literal["connected", "warning", "not_found"]
+IntegrationHealthStatus = Literal["connected", "warning", "not_configured"]
+SyncCursorState = Literal["idle", "running", "completed", "error"]
 
 
 class UserProfile(CamelModel):
@@ -116,6 +118,28 @@ class ClientIntelligenceSnapshot(CamelModel):
     signals: list[str]
 
 
+class IntegrationConnectionStatus(CamelModel):
+    provider: str
+    source: str
+    configured: bool
+    health: IntegrationHealthStatus
+    connected_at: str | None = None
+    last_verified_at: str | None = None
+    last_error: str | None = None
+
+
+class SyncCursorStatus(CamelModel):
+    key: str
+    provider: str
+    source: str
+    status: SyncCursorState
+    last_synced_at: str | None = None
+    last_cursor: str | None = None
+    records_seen: int = 0
+    records_processed: int = 0
+    last_error: str | None = None
+
+
 class TenantContext(CamelModel):
     tenant_id: str
     tenant_name: str
@@ -155,6 +179,9 @@ class ClickUpIntegrationStatus(CamelModel):
     base_url: str
     team_id: str | None = None
     list_id: str | None = None
+    connection: IntegrationConnectionStatus | None = None
+    ownership_cursor: SyncCursorStatus | None = None
+    intelligence_cursor: SyncCursorStatus | None = None
 
 
 class RuntimeCheck(CamelModel):

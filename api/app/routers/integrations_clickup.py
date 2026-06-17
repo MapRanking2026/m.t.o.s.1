@@ -11,14 +11,10 @@ router = APIRouter(prefix="/integrations/clickup", tags=["integrations"])
 
 
 @router.get("/status", response_model=ClickUpIntegrationStatus)
-async def clickup_status() -> ClickUpIntegrationStatus:
-    configured = bool(settings.clickup_api_token and settings.clickup_list_id)
-    return ClickUpIntegrationStatus(
-        configured=configured,
-        base_url=settings.clickup_base_url,
-        team_id=settings.clickup_team_id,
-        list_id=settings.clickup_list_id,
-    )
+async def clickup_status(
+    context: TenantContext = Depends(get_tenant_context),
+) -> ClickUpIntegrationStatus:
+    return get_repository().get_clickup_integration_status(context)
 
 
 @router.post("/ping")

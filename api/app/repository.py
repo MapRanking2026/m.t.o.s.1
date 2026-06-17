@@ -8,13 +8,16 @@ from app.models import (
     ClientIntelligenceSnapshot,
     ClientRecord,
     ClientWorkspace,
+    ClickUpIntegrationStatus,
     DashboardOverview,
+    IntegrationConnectionStatus,
     MetricCard,
     MonthlyTouchRecord,
     OwnershipExceptionRecord,
     OwnershipSyncRunResult,
     OwnershipSyncSummary,
     PromptTemplateRecord,
+    SyncCursorStatus,
     TenantContext,
     UserProfile,
 )
@@ -196,6 +199,37 @@ class InMemoryMTOSRepository:
             matched_clients=112,
             unmatched_clients=3,
             exception_count=len(self._exceptions),
+        )
+        self._clickup_connection = IntegrationConnectionStatus(
+            provider="ClickUp",
+            source="Client Health Tracker",
+            configured=True,
+            health="connected",
+            connected_at="2026-06-16T09:00:00Z",
+            last_verified_at="2026-06-16T09:05:00Z",
+            last_error=None,
+        )
+        self._ownership_cursor = SyncCursorStatus(
+            key="ownership_sync",
+            provider="ClickUp",
+            source="Client Health Tracker",
+            status="completed",
+            last_synced_at="2026-06-16T09:05:00Z",
+            last_cursor="page:0",
+            records_seen=4,
+            records_processed=4,
+            last_error=None,
+        )
+        self._intelligence_cursor = SyncCursorStatus(
+            key="client_intelligence",
+            provider="ClickUp",
+            source="Client Health Tracker",
+            status="completed",
+            last_synced_at="2026-06-16T09:05:00Z",
+            last_cursor="client_2",
+            records_seen=1,
+            records_processed=1,
+            last_error=None,
         )
         self._intelligence_snapshots = {
             "client_1": ClientIntelligenceSnapshot(
@@ -379,7 +413,18 @@ class InMemoryMTOSRepository:
                 ],
             )
 
-        self._intelligence_snapshots[client.id] = snapshot.model_copy(update={"synced_at": datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")})
+        synced_at = datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        self._intelligence_snapshots[client.id] = snapshot.model_copy(update={"synced_at": synced_at})
+        self._intelligence_cursor = self._intelligence_cursor.model_copy(
+            update={
+                "status": "completed",
+                "last_synced_at": synced_at,
+                "last_cursor": client.id,
+                "records_seen": 1,
+                "records_processed": 1,
+                "last_error": None,
+            }
+        )
         return self._intelligence_snapshots[client.id].model_copy()
 
     def list_prompts(self) -> list[PromptTemplateRecord]:
@@ -393,10 +438,35 @@ class InMemoryMTOSRepository:
         self._assert_admin(context)
         return deepcopy(self._exceptions)
 
+    def get_clickup_integration_status(self, context: TenantContext) -> ClickUpIntegrationStatus:
+        self._assert_admin(context)
+        return ClickUpIntegrationStatus(
+            configured=self._clickup_connection.configured,
+            base_url="https://api.clickup.com/api/v2",
+            team_id="demo-team",
+            list_id="demo-list",
+            connection=self._clickup_connection.model_copy(),
+            ownership_cursor=self._ownership_cursor.model_copy(),
+            intelligence_cursor=self._intelligence_cursor.model_copy(),
+        )
+
     def run_ownership_sync(self, context: TenantContext) -> OwnershipSyncRunResult:
         self._assert_admin(context)
         timestamp = datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         self._sync_summary = self._sync_summary.model_copy(update={"last_run_at": timestamp})
+        self._clickup_connection = self._clickup_connection.model_copy(
+            update={"health": "connected", "last_verified_at": timestamp, "last_error": None}
+        )
+        self._ownership_cursor = self._ownership_cursor.model_copy(
+            update={
+                "status": "completed",
+                "last_synced_at": timestamp,
+                "last_cursor": "page:0",
+                "records_seen": len(self._clients),
+                "records_processed": len(self._clients),
+                "last_error": None,
+            }
+        )
         return OwnershipSyncRunResult(
             status="completed",
             summary=self._sync_summary.model_copy(),

@@ -7,12 +7,15 @@ from app.models import (
     ClientIntelligenceSnapshot,
     ClientRecord,
     ClientWorkspace,
+    ClickUpIntegrationStatus,
     DashboardOverview,
+    IntegrationConnectionStatus,
     MonthlyTouchRecord,
     OwnershipExceptionRecord,
     OwnershipSyncRunResult,
     OwnershipSyncSummary,
     PromptTemplateRecord,
+    SyncCursorStatus,
     TenantContext,
     UserProfile,
 )
@@ -385,15 +388,64 @@ class SupabaseMTOSRepository:
             for row in rows
         ]
 
+    def get_clickup_integration_status(self, context: TenantContext) -> ClickUpIntegrationStatus:
+        self._assert_admin(context)
+        configured = bool(settings.clickup_api_token and settings.clickup_list_id)
+        connection = self._integration_connection(context.tenant_id, provider="clickup", source="client_health_tracker")
+        ownership_cursor = self._sync_cursor(context.tenant_id, "clickup", "client_health_tracker", "ownership_sync")
+        intelligence_cursor = self._sync_cursor(
+            context.tenant_id,
+            "clickup",
+            "client_health_tracker",
+            "client_intelligence",
+        )
+
+        return ClickUpIntegrationStatus(
+            configured=configured,
+            base_url=settings.clickup_base_url,
+            team_id=settings.clickup_team_id,
+            list_id=settings.clickup_list_id,
+            connection=connection,
+            ownership_cursor=ownership_cursor,
+            intelligence_cursor=intelligence_cursor,
+        )
+
     def run_ownership_sync(self, context: TenantContext) -> OwnershipSyncRunResult:
         self._assert_admin(context)
         if not settings.clickup_api_token or not settings.clickup_list_id:
+            self._upsert_integration_connection(
+                tenant_id=context.tenant_id,
+                provider="clickup",
+                source="client_health_tracker",
+                configured=False,
+                health="not_configured",
+                last_error="Missing MTOS_CLICKUP_API_TOKEN or MTOS_CLICKUP_LIST_ID.",
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="ClickUp integration is not configured (missing MTOS_CLICKUP_API_TOKEN or MTOS_CLICKUP_LIST_ID).",
             )
 
         http = self._http(context.auth_token)
+        self._upsert_integration_connection(
+            tenant_id=context.tenant_id,
+            provider="clickup",
+            source="client_health_tracker",
+            configured=True,
+            health="connected",
+            last_error=None,
+        )
+        self._upsert_sync_cursor(
+            tenant_id=context.tenant_id,
+            provider="clickup",
+            source="client_health_tracker",
+            key="ownership_sync",
+            status_value="running",
+            last_cursor="page:0",
+            records_seen=0,
+            records_processed=0,
+            last_error=None,
+        )
         clickup = ClickUpClient(
             api_token=settings.clickup_api_token,
             base_url=settings.clickup_base_url,
@@ -409,19 +461,81 @@ class SupabaseMTOSRepository:
                 clickup_max_tasks=settings.clickup_max_tasks,
             ),
         )
-        sync.run(tenant_id=context.tenant_id)
+        try:
+            result = sync.run(tenant_id=context.tenant_id)
+        except HTTPException as exc:
+            error_text = str(exc.detail) if hasattr(exc, "detail") else str(exc)
+            self._upsert_integration_connection(
+                tenant_id=context.tenant_id,
+                provider="clickup",
+                source="client_health_tracker",
+                configured=True,
+                health="warning",
+                last_error=error_text,
+            )
+            self._upsert_sync_cursor(
+                tenant_id=context.tenant_id,
+                provider="clickup",
+                source="client_health_tracker",
+                key="ownership_sync",
+                status_value="error",
+                last_cursor="page:0",
+                records_seen=0,
+                records_processed=0,
+                last_error=error_text,
+            )
+            raise
+
+        self._upsert_sync_cursor(
+            tenant_id=context.tenant_id,
+            provider="clickup",
+            source="client_health_tracker",
+            key="ownership_sync",
+            status_value="completed",
+            last_cursor=f"page:{max(settings.clickup_max_pages - 1, 0)}",
+            records_seen=result["matched_clients"] + result["unmatched_clients"],
+            records_processed=result["matched_clients"],
+            last_error=None,
+        )
 
         summary = self.get_ownership_sync_summary(context)
         return OwnershipSyncRunResult(status="completed", summary=summary, exceptions=[])
 
     def sync_client_intelligence(self, context: TenantContext, client_id: str) -> ClientIntelligenceSnapshot:
         if not settings.clickup_api_token or not settings.clickup_list_id:
+            self._upsert_integration_connection(
+                tenant_id=context.tenant_id,
+                provider="clickup",
+                source="client_health_tracker",
+                configured=False,
+                health="not_configured",
+                last_error="Missing MTOS_CLICKUP_API_TOKEN or MTOS_CLICKUP_LIST_ID.",
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="ClickUp integration is not configured (missing MTOS_CLICKUP_API_TOKEN or MTOS_CLICKUP_LIST_ID).",
             )
 
         client_row = self._client_row_for_context(context=context, client_id=client_id)
+        self._upsert_integration_connection(
+            tenant_id=context.tenant_id,
+            provider="clickup",
+            source="client_health_tracker",
+            configured=True,
+            health="connected",
+            last_error=None,
+        )
+        self._upsert_sync_cursor(
+            tenant_id=context.tenant_id,
+            provider="clickup",
+            source="client_health_tracker",
+            key="client_intelligence",
+            status_value="running",
+            last_cursor=client_id,
+            records_seen=0,
+            records_processed=0,
+            last_error=None,
+        )
         sync = ClientIntelligenceSyncService(
             http=self._http(None),
             clickup=ClickUpClient(
@@ -436,7 +550,44 @@ class SupabaseMTOSRepository:
                 clickup_max_tasks=settings.clickup_max_tasks,
             ),
         )
-        return sync.sync_client(tenant_id=context.tenant_id, client_row=client_row)
+        try:
+            snapshot = sync.sync_client(tenant_id=context.tenant_id, client_row=client_row)
+        except HTTPException as exc:
+            error_text = str(exc.detail) if hasattr(exc, "detail") else str(exc)
+            self._upsert_integration_connection(
+                tenant_id=context.tenant_id,
+                provider="clickup",
+                source="client_health_tracker",
+                configured=True,
+                health="warning",
+                last_error=error_text,
+            )
+            self._upsert_sync_cursor(
+                tenant_id=context.tenant_id,
+                provider="clickup",
+                source="client_health_tracker",
+                key="client_intelligence",
+                status_value="error",
+                last_cursor=client_id,
+                records_seen=0,
+                records_processed=0,
+                last_error=error_text,
+            )
+            raise
+
+        self._upsert_sync_cursor(
+            tenant_id=context.tenant_id,
+            provider="clickup",
+            source="client_health_tracker",
+            key="client_intelligence",
+            status_value="completed",
+            last_synced_at=snapshot.synced_at,
+            last_cursor=snapshot.clickup_task_id or client_id,
+            records_seen=1,
+            records_processed=1,
+            last_error=None,
+        )
+        return snapshot
 
     def _http(self, auth_token: str | None) -> SupabaseHTTP:
         if auth_token and self._supabase_anon_key:
@@ -498,6 +649,141 @@ class SupabaseMTOSRepository:
             summary=str(row.get("summary") or ""),
             signals=[str(item) for item in list(row.get("signals_json") or []) if str(item).strip()],
         )
+
+    def _integration_connection(
+        self, tenant_id: str, provider: str, source: str
+    ) -> IntegrationConnectionStatus | None:
+        try:
+            rows = self._http(None).get(
+                "integration_connections",
+                params={
+                    "select": "provider,source,configured,health,connected_at,last_verified_at,last_error",
+                    "tenant_id": f"eq.{tenant_id}",
+                    "provider": f"eq.{provider}",
+                    "source": f"eq.{source}",
+                    "limit": "1",
+                },
+            )
+        except httpx.HTTPStatusError:
+            return None
+        if not rows:
+            return None
+
+        row = rows[0]
+        return IntegrationConnectionStatus(
+            provider=str(row.get("provider") or provider).title(),
+            source=str(row.get("source") or source).replace("_", " ").title(),
+            configured=bool(row.get("configured")),
+            health=str(row.get("health") or "not_configured"),
+            connected_at=str(row.get("connected_at")) if row.get("connected_at") else None,
+            last_verified_at=str(row.get("last_verified_at")) if row.get("last_verified_at") else None,
+            last_error=str(row.get("last_error")) if row.get("last_error") else None,
+        )
+
+    def _sync_cursor(self, tenant_id: str, provider: str, source: str, key: str) -> SyncCursorStatus | None:
+        try:
+            rows = self._http(None).get(
+                "sync_cursors",
+                params={
+                    "select": "cursor_key,provider,source,status,last_synced_at,last_cursor,records_seen,records_processed,last_error",
+                    "tenant_id": f"eq.{tenant_id}",
+                    "provider": f"eq.{provider}",
+                    "source": f"eq.{source}",
+                    "cursor_key": f"eq.{key}",
+                    "limit": "1",
+                },
+            )
+        except httpx.HTTPStatusError:
+            return None
+        if not rows:
+            return None
+
+        row = rows[0]
+        return SyncCursorStatus(
+            key=str(row.get("cursor_key") or key),
+            provider=str(row.get("provider") or provider).title(),
+            source=str(row.get("source") or source).replace("_", " ").title(),
+            status=str(row.get("status") or "idle"),
+            last_synced_at=str(row.get("last_synced_at")) if row.get("last_synced_at") else None,
+            last_cursor=str(row.get("last_cursor")) if row.get("last_cursor") else None,
+            records_seen=int(row.get("records_seen") or 0),
+            records_processed=int(row.get("records_processed") or 0),
+            last_error=str(row.get("last_error")) if row.get("last_error") else None,
+        )
+
+    def _upsert_integration_connection(
+        self,
+        tenant_id: str,
+        provider: str,
+        source: str,
+        configured: bool,
+        health: str,
+        last_error: str | None,
+    ) -> None:
+        now = self._now_iso()
+        payload = {
+            "tenant_id": tenant_id,
+            "provider": provider,
+            "source": source,
+            "configured": configured,
+            "health": health,
+            "last_verified_at": now,
+            "last_error": last_error,
+        }
+        existing = self._integration_connection(tenant_id, provider=provider, source=source)
+        if configured and health == "connected":
+            payload["connected_at"] = existing.connected_at if existing and existing.connected_at else now
+        try:
+            self._http(None).upsert(
+                "integration_connections",
+                json_body=payload,
+                on_conflict="tenant_id,provider,source",
+            )
+        except httpx.HTTPStatusError:
+            return
+
+    def _upsert_sync_cursor(
+        self,
+        tenant_id: str,
+        provider: str,
+        source: str,
+        key: str,
+        status_value: str,
+        last_cursor: str | None,
+        records_seen: int,
+        records_processed: int,
+        last_error: str | None,
+        last_synced_at: str | None = None,
+    ) -> None:
+        payload = {
+            "tenant_id": tenant_id,
+            "provider": provider,
+            "source": source,
+            "cursor_key": key,
+            "status": status_value,
+            "last_cursor": last_cursor,
+            "records_seen": records_seen,
+            "records_processed": records_processed,
+            "last_error": last_error,
+        }
+        if last_synced_at:
+            payload["last_synced_at"] = last_synced_at
+        elif status_value == "completed":
+            payload["last_synced_at"] = self._now_iso()
+        try:
+            self._http(None).upsert(
+                "sync_cursors",
+                json_body=payload,
+                on_conflict="tenant_id,provider,source,cursor_key",
+            )
+        except httpx.HTTPStatusError:
+            return
+
+    @staticmethod
+    def _now_iso() -> str:
+        from datetime import UTC, datetime
+
+        return datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     @staticmethod
     def _assert_admin(context: TenantContext) -> None:

@@ -13,6 +13,17 @@ import {
   runOwnershipSync,
 } from "@/lib/api";
 
+const statusTone: Record<"connected" | "warning" | "not_configured" | "idle" | "running" | "completed" | "error", string> =
+  {
+    connected: "border-sky-300/20 bg-sky-300/10 text-sky-100",
+    warning: "border-amber-300/20 bg-amber-300/10 text-amber-100",
+    not_configured: "border-white/10 bg-white/[0.06] text-muted-foreground",
+    idle: "border-white/10 bg-white/[0.06] text-muted-foreground",
+    running: "border-sky-300/20 bg-sky-300/10 text-sky-100",
+    completed: "border-sky-300/20 bg-sky-300/10 text-sky-100",
+    error: "border-rose-300/20 bg-rose-300/10 text-rose-100",
+  };
+
 export function OwnershipSyncPanel() {
   const queryClient = useQueryClient();
   const shellOverview = queryClient.getQueryData<{ currentUser: { role: "admin" | "account_manager" } }>([
@@ -128,6 +139,66 @@ export function OwnershipSyncPanel() {
             <p className="mt-2 text-white">{summaryQuery.data?.exceptionCount ?? "--"}</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {summaryQuery.data?.unmatchedClients ?? "--"} unmatched assignments
+            </p>
+          </div>
+          <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Connection</p>
+              <Badge
+                className={
+                  clickupStatusQuery.data?.connection
+                    ? statusTone[clickupStatusQuery.data.connection.health]
+                    : statusTone.not_configured
+                }
+              >
+                {clickupStatusQuery.data?.connection?.health ?? "not_configured"}
+              </Badge>
+            </div>
+            <p className="mt-2 text-white">
+              {clickupStatusQuery.data?.connection?.lastVerifiedAt ?? clickupStatusQuery.data?.baseUrl ?? "Loading"}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {clickupStatusQuery.data?.connection?.lastError ?? "Persistent ClickUp connection state is now tracked."}
+            </p>
+          </div>
+          <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Ownership Cursor</p>
+              <Badge
+                className={
+                  clickupStatusQuery.data?.ownershipCursor
+                    ? statusTone[clickupStatusQuery.data.ownershipCursor.status]
+                    : statusTone.idle
+                }
+              >
+                {clickupStatusQuery.data?.ownershipCursor?.status ?? "idle"}
+              </Badge>
+            </div>
+            <p className="mt-2 text-white">{clickupStatusQuery.data?.ownershipCursor?.lastCursor ?? "Awaiting sync"}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {clickupStatusQuery.data?.ownershipCursor
+                ? `${clickupStatusQuery.data.ownershipCursor.recordsProcessed}/${clickupStatusQuery.data.ownershipCursor.recordsSeen} records processed`
+                : "Tracks the most recent incremental ownership sync state."}
+            </p>
+          </div>
+          <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Intelligence Cursor</p>
+              <Badge
+                className={
+                  clickupStatusQuery.data?.intelligenceCursor
+                    ? statusTone[clickupStatusQuery.data.intelligenceCursor.status]
+                    : statusTone.idle
+                }
+              >
+                {clickupStatusQuery.data?.intelligenceCursor?.status ?? "idle"}
+              </Badge>
+            </div>
+            <p className="mt-2 text-white">
+              {clickupStatusQuery.data?.intelligenceCursor?.lastCursor ?? "No client intelligence sync yet"}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {clickupStatusQuery.data?.intelligenceCursor?.lastSyncedAt ?? "Tracks the last per-client intelligence refresh."}
             </p>
           </div>
         </div>

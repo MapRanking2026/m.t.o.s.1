@@ -92,11 +92,36 @@ export interface ClientIntelligenceSnapshot {
   signals: string[];
 }
 
+export interface IntegrationConnectionStatus {
+  provider: string;
+  source: string;
+  configured: boolean;
+  health: "connected" | "warning" | "not_configured";
+  connectedAt: string | null;
+  lastVerifiedAt: string | null;
+  lastError: string | null;
+}
+
+export interface SyncCursorStatus {
+  key: string;
+  provider: string;
+  source: string;
+  status: "idle" | "running" | "completed" | "error";
+  lastSyncedAt: string | null;
+  lastCursor: string | null;
+  recordsSeen: number;
+  recordsProcessed: number;
+  lastError: string | null;
+}
+
 export interface ClickUpIntegrationStatus {
   configured: boolean;
   baseUrl: string;
   teamId: string | null;
   listId: string | null;
+  connection: IntegrationConnectionStatus | null;
+  ownershipCursor: SyncCursorStatus | null;
+  intelligenceCursor: SyncCursorStatus | null;
 }
 
 export interface OwnershipExceptionRecord {

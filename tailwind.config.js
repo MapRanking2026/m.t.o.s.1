@@ -37,11 +37,11 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        glow: "0 0 0 1px rgba(115, 246, 214, 0.15), 0 20px 80px rgba(115, 246, 214, 0.18)",
+        glow: "0 0 0 1px rgba(56, 189, 248, 0.16), 0 20px 80px rgba(56, 189, 248, 0.18)",
       },
       backgroundImage: {
         noise:
-          "radial-gradient(circle at top, rgba(115,246,214,0.14), transparent 30%), radial-gradient(circle at bottom right, rgba(107,114,255,0.16), transparent 26%)",
+          "radial-gradient(circle at top, rgba(56,189,248,0.14), transparent 30%), radial-gradient(circle at bottom right, rgba(107,114,255,0.16), transparent 26%)",
       },
     },
   },
