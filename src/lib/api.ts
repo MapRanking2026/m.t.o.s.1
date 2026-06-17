@@ -16,16 +16,12 @@ import { useAppStore } from "@/store/app-store";
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
   const state = useAppStore.getState();
-  const actingIdentity = state.actingIdentity;
   const accessToken = state.accessToken;
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      "X-MTOS-User-Id": actingIdentity.id,
-      "X-MTOS-Role": actingIdentity.role,
-      ...(actingIdentity.tenantUserId ? { "X-MTOS-Tenant-User-Id": actingIdentity.tenantUserId } : {}),
       ...(init?.headers ?? {}),
     },
   });

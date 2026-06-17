@@ -137,7 +137,7 @@ def build_dashboard_overview() -> DashboardOverview:
     ]
 
     return DashboardOverview(
-        tenant_name="Northstar Growth",
+        tenant_name="MTOS Workspace",
         current_user=current_user,
         metrics=metrics,
         clients=clients,

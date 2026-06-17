@@ -28,7 +28,7 @@ import App from "@/App";
 import { AuthProvider } from "@/app/auth-provider";
 
 const dashboardOverview = {
-  tenantName: "Northstar Growth",
+  tenantName: "MTOS Workspace",
   currentUser: {
     id: "user_1",
     fullName: "Ariana Cole",

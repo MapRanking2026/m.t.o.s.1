@@ -125,13 +125,6 @@ export interface OwnershipSyncRunResult {
   exceptions: OwnershipExceptionRecord[];
 }
 
-export interface DemoIdentity {
-  id: string;
-  fullName: string;
-  role: UserProfile["role"];
-  tenantUserId?: string | null;
-}
-
 export interface RuntimeCheck {
   key: string;
   label: string;

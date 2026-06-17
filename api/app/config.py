@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     cors_origins: list[str] = ["http://localhost:5173"]
     repository_mode: str = "in_memory"
-    trust_demo_headers: bool = True
+    trust_demo_headers: bool = False
     supabase_url: str | None = None
     supabase_anon_key: str | None = None
     supabase_service_role_key: str | None = None

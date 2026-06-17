@@ -45,13 +45,14 @@ def main() -> None:
 
     http = SupabaseHTTP(supabase_url, apikey=service_role_key)
 
-    tenant_id = UUID("11111111-1111-1111-1111-111111111111")
-    tenant_slug = "northstar-growth"
+    tenant_id = UUID(must_env("MTOS_SEED_TENANT_ID"))
+    tenant_slug = must_env("MTOS_SEED_TENANT_SLUG")
+    tenant_name = must_env("MTOS_SEED_TENANT_NAME")
 
     try:
         http.upsert(
             "tenants",
-            json_body={"id": str(tenant_id), "name": "Northstar Growth", "slug": tenant_slug, "status": "active"},
+            json_body={"id": str(tenant_id), "name": tenant_name, "slug": tenant_slug, "status": "active"},
             on_conflict="slug",
         )
     except httpx.HTTPStatusError as error:

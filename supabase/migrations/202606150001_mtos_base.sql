@@ -299,6 +299,3 @@ using (
   and public.current_app_role() = 'admin'
 );
 
-insert into public.tenants (id, name, slug)
-values ('11111111-1111-1111-1111-111111111111', 'Northstar Growth', 'northstar-growth')
-on conflict (id) do nothing;

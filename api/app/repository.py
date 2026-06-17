@@ -23,7 +23,7 @@ from app.models import (
 class InMemoryMTOSRepository:
     def __init__(self) -> None:
         self.tenant_id = "tenant_1"
-        self.tenant_name = "Northstar Growth"
+        self.tenant_name = "MTOS Workspace"
         self._users = [
             UserProfile(
                 id="user_1",

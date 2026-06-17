@@ -24,7 +24,7 @@ def test_dashboard_overview_shape() -> None:
     assert response.status_code == 200
 
     payload = response.json()
-    assert payload["tenantName"] == "Northstar Growth"
+    assert payload["tenantName"] == "MTOS Workspace"
     assert len(payload["clients"]) >= 1
 
 

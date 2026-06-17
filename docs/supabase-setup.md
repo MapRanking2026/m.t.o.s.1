@@ -31,15 +31,17 @@ Set these in `.env.local` (repo root) or `api/.env`:
 - `MTOS_SUPABASE_SERVICE_ROLE_KEY=...`
 - `MTOS_SUPABASE_ANON_KEY=...` (recommended)
 
-## 4. Configure Web (Optional Demo Headers)
+## 4. Configure Seed Tenant
 
-Set these in the repo root `.env.local`:
+Set these in the repo root `.env.local` before running the seed:
 
-- `VITE_DEMO_TENANT_USER_ID_ADMIN=22222222-2222-2222-2222-222222222222`
-- `VITE_DEMO_TENANT_USER_ID_AM1=33333333-3333-3333-3333-333333333333`
-- `VITE_DEMO_TENANT_USER_ID_AM2=44444444-4444-4444-4444-444444444444`
+- `MTOS_SEED_TENANT_ID=<tenant-uuid>`
+- `MTOS_SEED_TENANT_NAME=<tenant-name>`
+- `MTOS_SEED_TENANT_SLUG=<tenant-slug>`
 
 Restart `npm run dev` after changing env vars.
+
+The web app no longer uses demo tenant headers. Authenticate with Supabase Auth and ensure each user has a matching `tenant_users` row.
 
 ## 5. Verify In App
 

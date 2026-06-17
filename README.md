@@ -103,15 +103,17 @@ Setup guide: `docs/supabase-setup.md`
 
 ## Seeding Supabase (Dev)
 
-If you want the current UI to run against Supabase immediately (before wiring real Supabase Auth in the frontend), you can seed deterministic demo rows using the service role key:
+If you want the current UI to run against Supabase with real auth, seed tenant-scoped starter rows using the service role key:
 
 ```bash
 cd api
 py scripts/seed_supabase.py
 ```
 
-Then set these in your web `.env.local` so the demo identities can pass `X-MTOS-Tenant-User-Id`:
+Set these first in your repo root `.env.local`:
 
-- `VITE_DEMO_TENANT_USER_ID_ADMIN=22222222-2222-2222-2222-222222222222`
-- `VITE_DEMO_TENANT_USER_ID_AM1=33333333-3333-3333-3333-333333333333`
-- `VITE_DEMO_TENANT_USER_ID_AM2=44444444-4444-4444-4444-444444444444`
+- `MTOS_SEED_TENANT_ID=<tenant-uuid>`
+- `MTOS_SEED_TENANT_NAME=<tenant-name>`
+- `MTOS_SEED_TENANT_SLUG=<tenant-slug>`
+
+The web app no longer relies on demo tenant headers. Sign in through Supabase Auth instead.

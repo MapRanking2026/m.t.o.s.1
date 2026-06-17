@@ -6,17 +6,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
+  fetchDashboardOverview,
   fetchClickUpIntegrationStatus,
   fetchOwnershipExceptions,
   fetchOwnershipSyncSummary,
   runOwnershipSync,
 } from "@/lib/api";
-import { useAppStore } from "@/store/app-store";
 
 export function OwnershipSyncPanel() {
   const queryClient = useQueryClient();
-  const actingRole = useAppStore((state) => state.actingIdentity.role);
-  const isAdmin = actingRole === "admin";
+  const shellOverview = queryClient.getQueryData<{ currentUser: { role: "admin" | "account_manager" } }>([
+    "shell-overview",
+  ]);
+  const fallbackRoleQuery = useQuery({
+    queryKey: ["ownership-panel-role"],
+    queryFn: fetchDashboardOverview,
+    enabled: !shellOverview,
+  });
+  const resolvedRole = shellOverview?.currentUser.role ?? fallbackRoleQuery.data?.currentUser.role;
+  const isAdmin = resolvedRole === "admin";
 
   const summaryQuery = useQuery({
     queryKey: ["ownership-summary"],
@@ -64,7 +72,7 @@ export function OwnershipSyncPanel() {
           <div>
             <p className="font-medium text-white">Admin-only ownership administration</p>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              Account Managers can only see assigned clients. Switch to the admin identity above to review ClickUp
+              Account Managers can only see assigned clients. Sign in with an admin account to review ClickUp
               ownership sync results and unresolved assignment exceptions.
             </p>
           </div>
