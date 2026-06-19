@@ -3,11 +3,14 @@ import type {
   ClientRecord,
   ClientWorkspace,
   ClickUpIntegrationStatus,
+  ClickUpClientImportResult,
   DashboardOverview,
+  MonthlyTouchDetail,
   MonthlyTouchRecord,
   OwnershipExceptionRecord,
   OwnershipSyncRunResult,
   OwnershipSyncSummary,
+  PromptTemplateDetail,
   PromptTemplateRecord,
   RuntimeStatus,
 } from "@/types/mtos";
@@ -64,8 +67,30 @@ export function fetchMonthlyTouches() {
   return requestJson<MonthlyTouchRecord[]>("/api/v1/monthly-touches");
 }
 
+export function fetchMonthlyTouchDetail(touchId: string) {
+  return requestJson<MonthlyTouchDetail>(`/api/v1/monthly-touches/${touchId}`);
+}
+
 export function fetchPromptTemplates() {
   return requestJson<PromptTemplateRecord[]>("/api/v1/prompts");
+}
+
+export function fetchPromptDetail(promptId: string) {
+  return requestJson<PromptTemplateDetail>(`/api/v1/prompts/${promptId}`);
+}
+
+export function createPromptVersion(promptId: string, payload: { systemPrompt: string; userPrompt: string }) {
+  return requestJson<PromptTemplateDetail>(`/api/v1/prompts/${promptId}/versions`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function activatePromptVersion(promptId: string, versionId: string) {
+  return requestJson<PromptTemplateDetail>(`/api/v1/prompts/${promptId}/activate`, {
+    method: "POST",
+    body: JSON.stringify({ versionId }),
+  });
 }
 
 export function fetchOwnershipSyncSummary() {
@@ -84,6 +109,12 @@ export function runOwnershipSync() {
 
 export function fetchClickUpIntegrationStatus() {
   return requestJson<ClickUpIntegrationStatus>("/api/v1/integrations/clickup/status");
+}
+
+export function importClickUpClients() {
+  return requestJson<ClickUpClientImportResult>("/api/v1/integrations/clickup/import-clients", {
+    method: "POST",
+  });
 }
 
 export function fetchRuntimeStatus() {

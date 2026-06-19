@@ -6,8 +6,12 @@ from app.models import (
     ClientRecord,
     ClientWorkspace,
     DashboardOverview,
+    MonthlyTouchDetail,
     MonthlyTouchRecord,
+    PromptActivationRequest,
     PromptTemplateRecord,
+    PromptTemplateDetail,
+    PromptVersionCreateRequest,
     TenantContext,
 )
 from app.repository_selector import get_repository
@@ -55,6 +59,34 @@ async def list_monthly_touches(context: TenantContext = Depends(get_tenant_conte
     return get_repository().list_monthly_touches(context)
 
 
+@router.get("/monthly-touches/{touch_id}", response_model=MonthlyTouchDetail)
+async def get_monthly_touch_detail(
+    touch_id: str, context: TenantContext = Depends(get_tenant_context)
+) -> MonthlyTouchDetail:
+    return get_repository().get_monthly_touch_detail(context, touch_id)
+
+
 @router.get("/prompts", response_model=list[PromptTemplateRecord])
 async def list_prompts() -> list[PromptTemplateRecord]:
     return get_repository().list_prompts()
+
+
+@router.get("/prompts/{prompt_id}", response_model=PromptTemplateDetail)
+async def get_prompt_detail(
+    prompt_id: str, context: TenantContext = Depends(get_tenant_context)
+) -> PromptTemplateDetail:
+    return get_repository().get_prompt_detail(context, prompt_id)
+
+
+@router.post("/prompts/{prompt_id}/versions", response_model=PromptTemplateDetail)
+async def create_prompt_version(
+    prompt_id: str, payload: PromptVersionCreateRequest, context: TenantContext = Depends(get_tenant_context)
+) -> PromptTemplateDetail:
+    return get_repository().create_prompt_version(context, prompt_id, payload)
+
+
+@router.post("/prompts/{prompt_id}/activate", response_model=PromptTemplateDetail)
+async def activate_prompt_version(
+    prompt_id: str, payload: PromptActivationRequest, context: TenantContext = Depends(get_tenant_context)
+) -> PromptTemplateDetail:
+    return get_repository().activate_prompt_version(context, prompt_id, payload)

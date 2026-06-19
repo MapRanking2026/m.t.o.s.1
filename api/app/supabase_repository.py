@@ -4,17 +4,27 @@ from fastapi import HTTPException, status
 from app.config import settings
 from app.integrations.clickup import ClickUpClient
 from app.models import (
+    ClickUpClientImportResult,
     ClientIntelligenceSnapshot,
     ClientRecord,
     ClientWorkspace,
     ClickUpIntegrationStatus,
     DashboardOverview,
     IntegrationConnectionStatus,
+    MonthlyTouchArtifact,
+    MonthlyTouchChecklistItem,
+    MonthlyTouchDetail,
     MonthlyTouchRecord,
+    MonthlyTouchWorkflowStep,
     OwnershipExceptionRecord,
     OwnershipSyncRunResult,
     OwnershipSyncSummary,
+    PromptActivationRequest,
     PromptTemplateRecord,
+    PromptTemplateDetail,
+    PromptVersionCreateRequest,
+    PromptVersionRecord,
+    PromptWorkflowAssignment,
     SyncCursorStatus,
     TenantContext,
     UserProfile,
@@ -244,12 +254,62 @@ class SupabaseMTOSRepository:
             MonthlyTouchRecord(
                 id=touch["id"],
                 client_name=name_by_client_id.get(touch["client_id"], "Client"),
+                client_id=str(touch["client_id"]),
                 scheduled_at=str(touch["scheduled_at"]),
                 stage=touch.get("stage") or "Meeting Scheduled",
                 owner=owner_by_client_id.get(touch["client_id"], "Unassigned"),
             )
             for touch in touches
         ]
+
+    def get_monthly_touch_detail(self, context: TenantContext, touch_id: str) -> MonthlyTouchDetail:
+        touch = next((item for item in self.list_monthly_touches(context) if item.id == touch_id), None)
+        if touch is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monthly Touch not found")
+        if not touch.client_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+        client = next((item for item in self.list_clients(context) if item.id == touch.client_id), None)
+        if client is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+        steps = self._build_touch_workflow_steps(touch.stage)
+        checklist = self._build_meeting_checklist(touch.stage)
+
+        return MonthlyTouchDetail(
+            touch=touch.model_copy(),
+            account_health_score=client.health_score,
+            risk_level=client.risk_level,
+            executive_summary=(
+                f"{client.name} enters this Monthly Touch with a health score of {client.health_score}/100 and "
+                f"{client.risk_level.lower()} account risk. The meeting should prove progress, address current "
+                f"friction, and align the client around the next move in {client.top_opportunity.lower()}."
+            ),
+            top_wins=[
+                f"Momentum is visible around {client.top_opportunity.lower()}, giving the AM a concrete growth story to anchor.",
+                f"Ownership is assigned to {touch.owner}, so the meeting has a clear operator and follow-through path.",
+                f"The account already has a defined Monthly Touch slot at {touch.scheduled_at}, keeping cadence intact.",
+            ],
+            key_issues=[
+                f"{client.risk_level} risk means the meeting cannot stay tactical; it needs a clear value narrative.",
+                "Post-meeting outputs still require AM approval before deployment, so handoff speed matters.",
+            ],
+            strategic_recommendations=[
+                "Use the first five minutes to connect recent wins to business value, not just channel activity.",
+                f"Treat {client.top_opportunity.lower()} as the featured growth path and ask the client what would make it actionable this month.",
+                "Close with explicit owners, deadlines, and the next Monthly Touch date before ending the call.",
+            ],
+            suggested_questions=[
+                f"What outcome would make the next 30 days feel like a real step forward for {client.name}?",
+                "Which recent campaign change felt most valuable from the client side?",
+                "What friction is the client still feeling that the team may not see inside the tools?",
+            ],
+            workflow_steps=steps,
+            meeting_checklist=checklist,
+            generated_artifacts=self._build_generated_artifacts(touch.stage, client),
+            prompt_stack=self._build_prompt_stack(self.list_prompts()),
+            next_action=next(step.detail for step in steps if step.status == "current"),
+        )
 
     def get_client_workspace(self, context: TenantContext, client_id: str) -> ClientWorkspace:
         client = next((item for item in self.list_clients(context) if item.id == client_id), None)
@@ -272,6 +332,7 @@ class SupabaseMTOSRepository:
             MonthlyTouchRecord(
                 id=touch["id"],
                 client_name=client.name,
+                client_id=client.id,
                 scheduled_at=str(touch["scheduled_at"]),
                 stage=touch.get("stage") or "Meeting Scheduled",
                 owner=client.owner,
@@ -307,23 +368,120 @@ class SupabaseMTOSRepository:
         templates = http.get(
             "prompt_templates",
             params={
-                "select": "id,name,category,status,provider,active_version",
+                "select": "id,name,category,status",
                 "order": "category.asc,name.asc",
                 "limit": "50",
             },
         )
+        versions = http.get(
+            "prompt_versions",
+            params={
+                "select": "id,prompt_template_id,version_number,is_active,config_json",
+                "order": "version_number.desc",
+                "limit": "200",
+            },
+        )
+        versions_by_template: dict[str, list[dict[str, object]]] = {}
+        for row in versions:
+            template_id = str(row.get("prompt_template_id") or "")
+            if not template_id:
+                continue
+            versions_by_template.setdefault(template_id, []).append(row)
 
         return [
             PromptTemplateRecord(
                 id=row["id"],
                 name=row["name"],
                 category=row["category"],
-                version=row.get("active_version") or "v1",
+                version=self._prompt_version_label(versions_by_template.get(str(row["id"]), [])),
                 status=(row.get("status") or "Draft").title(),
-                provider=(row.get("provider") or "Mixed"),
+                provider=self._prompt_provider(versions_by_template.get(str(row["id"]), [])),
             )
             for row in templates
         ]
+
+    def get_prompt_detail(self, context: TenantContext, prompt_id: str) -> PromptTemplateDetail:
+        self._assert_admin(context)
+        http = self._http(context.auth_token)
+        templates = http.get(
+            "prompt_templates",
+            params={
+                "select": "id,name,category,status",
+                "id": f"eq.{prompt_id}",
+                "limit": "1",
+            },
+        )
+        if not templates:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt template not found")
+        row = templates[0]
+        versions = self._prompt_versions_for_template(context=context, prompt_id=prompt_id)
+        active_version = next((item for item in versions if item.is_active), None)
+        return PromptTemplateDetail(
+            template=PromptTemplateRecord(
+                id=str(row["id"]),
+                name=str(row["name"]),
+                category=str(row["category"]),
+                version=self._prompt_version_label(
+                    [{"version_number": item.version_number, "is_active": item.is_active} for item in versions]
+                ),
+                status=str(row.get("status") or "Draft").title(),
+                provider=self._prompt_provider(
+                    [{"config_json": {"provider": "Mixed"}, "is_active": item.is_active} for item in versions]
+                ),
+            ),
+            active_version_id=active_version.id if active_version else None,
+            versions=versions,
+        )
+
+    def create_prompt_version(
+        self, context: TenantContext, prompt_id: str, payload: PromptVersionCreateRequest
+    ) -> PromptTemplateDetail:
+        self._assert_admin(context)
+        http = self._http(context.auth_token)
+        versions = self._prompt_versions_for_template(context=context, prompt_id=prompt_id)
+        next_version_number = max((item.version_number for item in versions), default=0) + 1
+        http.post(
+            "prompt_versions",
+            json_body={
+                "prompt_template_id": prompt_id,
+                "version_number": next_version_number,
+                "system_prompt": payload.system_prompt,
+                "user_prompt": payload.user_prompt,
+                "config_json": {"provider": "Mixed"},
+                "is_active": False,
+            },
+        )
+        http.patch(
+            "prompt_templates",
+            json_body={"status": "draft"},
+            params={"id": f"eq.{prompt_id}"},
+        )
+        return self.get_prompt_detail(context, prompt_id)
+
+    def activate_prompt_version(
+        self, context: TenantContext, prompt_id: str, payload: PromptActivationRequest
+    ) -> PromptTemplateDetail:
+        self._assert_admin(context)
+        http = self._http(context.auth_token)
+        versions = self._prompt_versions_for_template(context=context, prompt_id=prompt_id)
+        if not any(item.id == payload.version_id for item in versions):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt version not found")
+        http.patch(
+            "prompt_versions",
+            json_body={"is_active": False},
+            params={"prompt_template_id": f"eq.{prompt_id}", "is_active": "eq.true"},
+        )
+        http.patch(
+            "prompt_versions",
+            json_body={"is_active": True},
+            params={"id": f"eq.{payload.version_id}"},
+        )
+        http.patch(
+            "prompt_templates",
+            json_body={"status": "active"},
+            params={"id": f"eq.{prompt_id}"},
+        )
+        return self.get_prompt_detail(context, prompt_id)
 
     def get_ownership_sync_summary(self, context: TenantContext) -> OwnershipSyncSummary:
         self._assert_admin(context)
@@ -408,6 +566,75 @@ class SupabaseMTOSRepository:
             connection=connection,
             ownership_cursor=ownership_cursor,
             intelligence_cursor=intelligence_cursor,
+        )
+
+    def import_clickup_clients(self, context: TenantContext) -> ClickUpClientImportResult:
+        self._assert_admin(context)
+        if not settings.clickup_api_token or not settings.clickup_list_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ClickUp integration is not configured (missing MTOS_CLICKUP_API_TOKEN or MTOS_CLICKUP_LIST_ID).",
+            )
+
+        clickup = ClickUpClient(
+            api_token=settings.clickup_api_token,
+            base_url=settings.clickup_base_url,
+        )
+
+        tasks = []
+        for page in range(settings.clickup_max_pages):
+            page_tasks = clickup.list_tasks(
+                list_id=settings.clickup_list_id,
+                page=page,
+                include_closed=settings.clickup_include_closed,
+            )
+            if not page_tasks:
+                break
+            tasks.extend(page_tasks)
+            if len(tasks) >= settings.clickup_max_tasks:
+                tasks = tasks[: settings.clickup_max_tasks]
+                break
+
+        payload = [
+            {
+                "tenant_id": context.tenant_id,
+                "external_ref": task.id,
+                "name": task.name,
+            }
+            for task in tasks
+            if task.id and task.name
+        ]
+
+        try:
+            rows = self._http(None).upsert(
+                "clients",
+                json_body=payload,
+                on_conflict="tenant_id,external_ref",
+            )
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text if exc.response is not None else str(exc)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "ClickUp client import failed. "
+                    "Apply migration `202606160004_clickup_client_import.sql` (unique external_ref index) and retry. "
+                    f"Underlying error: {detail[:300]}"
+                ),
+            ) from exc
+
+        self._upsert_integration_connection(
+            tenant_id=context.tenant_id,
+            provider="clickup",
+            source="client_health_tracker",
+            configured=True,
+            health="connected",
+            last_error=None,
+        )
+
+        return ClickUpClientImportResult(
+            status="completed",
+            tasks_seen=len(tasks),
+            clients_upserted=len(rows),
         )
 
     def run_ownership_sync(self, context: TenantContext) -> OwnershipSyncRunResult:
@@ -588,6 +815,210 @@ class SupabaseMTOSRepository:
             last_error=None,
         )
         return snapshot
+
+    def _prompt_versions_for_template(self, context: TenantContext, prompt_id: str) -> list[PromptVersionRecord]:
+        rows = self._http(context.auth_token).get(
+            "prompt_versions",
+            params={
+                "select": "id,version_number,system_prompt,user_prompt,is_active,created_at",
+                "prompt_template_id": f"eq.{prompt_id}",
+                "order": "version_number.desc",
+                "limit": "50",
+            },
+        )
+        return [
+            PromptVersionRecord(
+                id=str(row["id"]),
+                version_number=int(row.get("version_number") or 1),
+                system_prompt=str(row.get("system_prompt") or ""),
+                user_prompt=str(row.get("user_prompt") or ""),
+                is_active=bool(row.get("is_active")),
+                created_at=str(row.get("created_at") or ""),
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _prompt_version_label(rows: list[dict[str, object]]) -> str:
+        active = next((row for row in rows if bool(row.get("is_active"))), None)
+        if active and active.get("version_number"):
+            return f"v{active['version_number']}"
+        latest = rows[0] if rows else None
+        if latest and latest.get("version_number"):
+            return f"v{latest['version_number']}"
+        return "v1"
+
+    @staticmethod
+    def _prompt_provider(rows: list[dict[str, object]]) -> str:
+        active = next((row for row in rows if bool(row.get("is_active"))), None)
+        config = active.get("config_json") if active else None
+        if isinstance(config, dict):
+            provider = config.get("provider")
+            if isinstance(provider, str) and provider in {"Claude", "Gemini", "Mixed"}:
+                return provider
+        return "Mixed"
+
+    def _build_touch_workflow_steps(self, current_stage: str) -> list[MonthlyTouchWorkflowStep]:
+        sequence = [
+            ("context_collection", "Context Collection", "Gemini compiles account context from connected systems."),
+            ("brief_generation", "Brief Generation", "Claude turns the organized context into the Monthly Touch brief."),
+            ("live_meeting", "Monthly Touch Meeting", "The AM runs the meeting with the brief and checklist."),
+            ("meeting_analysis", "Meeting Analysis", "Claude reviews transcript, notes, and checklist completion."),
+            ("ticket_creation", "Ticket Creation", "Draft department tickets and deliverables are prepared for review."),
+            ("approval", "Approval", "The AM approves tickets, follow-up email, and action items."),
+            ("deployment", "Deployment", "Approved outputs are sent and internal records are updated."),
+        ]
+        stage_to_position = {
+            "Pre-Meeting Intelligence": 0,
+            "Meeting Scheduled": 1,
+            "Meeting Intelligence": 3,
+            "Task Approval": 4,
+            "Recap Approval": 5,
+            "QA Audit": 6,
+        }
+        current_index = stage_to_position.get(current_stage, 0)
+        steps: list[MonthlyTouchWorkflowStep] = []
+        for index, (step_id, label, detail) in enumerate(sequence):
+            status_value = "upcoming"
+            if index < current_index:
+                status_value = "complete"
+            elif index == current_index:
+                status_value = "current"
+            steps.append(
+                MonthlyTouchWorkflowStep(
+                    id=step_id,
+                    label=label,
+                    status=status_value,
+                    detail=detail,
+                )
+            )
+        return steps
+
+    def _build_meeting_checklist(self, current_stage: str) -> list[MonthlyTouchChecklistItem]:
+        done_cutoff = {
+            "Pre-Meeting Intelligence": 2,
+            "Meeting Scheduled": 3,
+            "Meeting Intelligence": 7,
+            "Task Approval": 9,
+            "Recap Approval": 10,
+            "QA Audit": 11,
+        }.get(current_stage, 2)
+        items = [
+            "Discussed 3 wins",
+            "Discussed 2 issues",
+            "Reviewed rankings and visibility",
+            "Reviewed website progress",
+            "Reviewed territory expansion",
+            "Reviewed calls and lead quality",
+            "Reviewed Google Ads performance",
+            "Asked strategic questions",
+            "Requested testimonial or referral opportunity",
+            "Drafted post-meeting actions",
+            "Prepared follow-up email",
+            "Scheduled next Monthly Touch",
+        ]
+        return [
+            MonthlyTouchChecklistItem(
+                id=f"checklist_{index + 1}",
+                label=label,
+                status="done" if index < done_cutoff else "pending",
+            )
+            for index, label in enumerate(items)
+        ]
+
+    def _build_generated_artifacts(self, current_stage: str, client: ClientRecord) -> list[MonthlyTouchArtifact]:
+        artifact_status = {
+            "Pre-Meeting Intelligence": ("ready", "in_progress", "pending_approval"),
+            "Meeting Scheduled": ("ready", "pending_approval", "pending_approval"),
+            "Meeting Intelligence": ("ready", "ready", "pending_approval"),
+            "Task Approval": ("ready", "ready", "pending_approval"),
+            "Recap Approval": ("ready", "ready", "pending_approval"),
+            "QA Audit": ("ready", "ready", "ready"),
+        }.get(current_stage, ("ready", "in_progress", "pending_approval"))
+        return [
+            MonthlyTouchArtifact(
+                id="brief",
+                label="Monthly Touch Brief",
+                status=artifact_status[0],
+                detail=f"Prepared around {client.top_opportunity.lower()} and current account health.",
+            ),
+            MonthlyTouchArtifact(
+                id="tickets",
+                label="Department Ticket Drafts",
+                status=artifact_status[1],
+                detail="Draft tasks are held for AM review before they are sent to ClickUp.",
+            ),
+            MonthlyTouchArtifact(
+                id="follow_up",
+                label="Post-Meeting Follow-Up",
+                status=artifact_status[2],
+                detail="Summary email and action items remain human-approved before deployment.",
+            ),
+        ]
+
+    def _build_prompt_stack(self, prompts: list[PromptTemplateRecord]) -> list[PromptWorkflowAssignment]:
+        return [
+            self._select_prompt_assignment(
+                prompts,
+                purpose="Brief Generation",
+                detail="Controls how Claude structures the Monthly Touch brief before the meeting.",
+                preferred_terms=["brief", "monthly touch"],
+            ),
+            self._select_prompt_assignment(
+                prompts,
+                purpose="Meeting Audit",
+                detail="Controls how Claude evaluates meeting quality, coaching gaps, and client intelligence after the call.",
+                preferred_terms=["audit", "retention"],
+            ),
+            self._select_prompt_assignment(
+                prompts,
+                purpose="Ticket Creation",
+                detail="Controls how follow-up tickets are drafted and prepared for AM approval.",
+                preferred_terms=["ticket", "follow-up"],
+            ),
+            self._select_prompt_assignment(
+                prompts,
+                purpose="Post-Meeting Email",
+                detail="Controls how the follow-up recap and next-step email are prepared for deployment.",
+                preferred_terms=["email", "follow-up", "recap"],
+            ),
+        ]
+
+    def _select_prompt_assignment(
+        self,
+        prompts: list[PromptTemplateRecord],
+        purpose: str,
+        detail: str,
+        preferred_terms: list[str],
+    ) -> PromptWorkflowAssignment:
+        matched = next(
+            (
+                prompt
+                for prompt in prompts
+                if any(term in f"{prompt.name} {prompt.category}".lower() for term in preferred_terms)
+            ),
+            None,
+        )
+        if matched is None:
+            return PromptWorkflowAssignment(
+                purpose=purpose,
+                template_id=None,
+                template_name="Not Configured",
+                version="—",
+                provider="Mixed",
+                status="missing",
+                detail=detail,
+            )
+        status_value = "active" if matched.status == "Active" else "fallback"
+        return PromptWorkflowAssignment(
+            purpose=purpose,
+            template_id=matched.id,
+            template_name=matched.name,
+            version=matched.version,
+            provider=matched.provider,
+            status=status_value,
+            detail=detail,
+        )
 
     def _http(self, auth_token: str | None) -> SupabaseHTTP:
         if auth_token and self._supabase_anon_key:

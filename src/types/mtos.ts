@@ -28,6 +28,7 @@ export interface ClientRecord {
 export interface MonthlyTouchRecord {
   id: string;
   clientName: string;
+  clientId: string | null;
   scheduledAt: string;
   stage:
     | "Pre-Meeting Intelligence"
@@ -39,6 +40,52 @@ export interface MonthlyTouchRecord {
   owner: string;
 }
 
+export interface MonthlyTouchWorkflowStep {
+  id: string;
+  label: string;
+  status: "complete" | "current" | "upcoming";
+  detail: string;
+}
+
+export interface MonthlyTouchChecklistItem {
+  id: string;
+  label: string;
+  status: "done" | "pending";
+}
+
+export interface MonthlyTouchArtifact {
+  id: string;
+  label: string;
+  status: "ready" | "in_progress" | "pending_approval";
+  detail: string;
+}
+
+export interface PromptWorkflowAssignment {
+  purpose: string;
+  templateId: string | null;
+  templateName: string;
+  version: string;
+  provider: "Claude" | "Gemini" | "Mixed";
+  status: "active" | "fallback" | "missing";
+  detail: string;
+}
+
+export interface MonthlyTouchDetail {
+  touch: MonthlyTouchRecord;
+  accountHealthScore: number;
+  riskLevel: "Low" | "Medium" | "High";
+  executiveSummary: string;
+  topWins: string[];
+  keyIssues: string[];
+  strategicRecommendations: string[];
+  suggestedQuestions: string[];
+  workflowSteps: MonthlyTouchWorkflowStep[];
+  meetingChecklist: MonthlyTouchChecklistItem[];
+  generatedArtifacts: MonthlyTouchArtifact[];
+  promptStack: PromptWorkflowAssignment[];
+  nextAction: string;
+}
+
 export interface PromptTemplateRecord {
   id: string;
   name: string;
@@ -46,6 +93,21 @@ export interface PromptTemplateRecord {
   version: string;
   status: "Active" | "Draft" | "Archived";
   provider: "Claude" | "Gemini" | "Mixed";
+}
+
+export interface PromptVersionRecord {
+  id: string;
+  versionNumber: number;
+  systemPrompt: string;
+  userPrompt: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface PromptTemplateDetail {
+  template: PromptTemplateRecord;
+  activeVersionId: string | null;
+  versions: PromptVersionRecord[];
 }
 
 export interface ActivityRecord {
@@ -112,6 +174,12 @@ export interface SyncCursorStatus {
   recordsSeen: number;
   recordsProcessed: number;
   lastError: string | null;
+}
+
+export interface ClickUpClientImportResult {
+  status: "completed";
+  tasksSeen: number;
+  clientsUpserted: number;
 }
 
 export interface ClickUpIntegrationStatus {

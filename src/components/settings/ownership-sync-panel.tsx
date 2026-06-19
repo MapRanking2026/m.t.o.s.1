@@ -10,6 +10,7 @@ import {
   fetchClickUpIntegrationStatus,
   fetchOwnershipExceptions,
   fetchOwnershipSyncSummary,
+  importClickUpClients,
   runOwnershipSync,
 } from "@/lib/api";
 
@@ -53,6 +54,25 @@ export function OwnershipSyncPanel() {
     queryKey: ["clickup-status"],
     queryFn: fetchClickUpIntegrationStatus,
     enabled: isAdmin,
+  });
+
+  const importClientsMutation = useMutation({
+    mutationFn: importClickUpClients,
+    onSuccess: (data) => {
+      toast.success(`Imported ${data.clientsUpserted} clients from ClickUp`);
+      void queryClient.invalidateQueries({ queryKey: ["clients"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-overview"] });
+      void queryClient.invalidateQueries({ queryKey: ["ownership-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["ownership-exceptions"] });
+      void queryClient.invalidateQueries({ queryKey: ["clickup-status"] });
+    },
+    onError: (error) => {
+      if (error instanceof Error && error.message) {
+        toast.error(error.message);
+        return;
+      }
+      toast.error("Client import failed");
+    },
   });
 
   const syncMutation = useMutation({
@@ -115,6 +135,20 @@ export function OwnershipSyncPanel() {
             <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
             Run Sync
           </Button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button
+            variant="secondary"
+            onClick={() => importClientsMutation.mutate()}
+            disabled={importClientsMutation.isPending || clickupStatusQuery.data?.configured === false}
+          >
+            <RefreshCw className={`h-4 w-4 ${importClientsMutation.isPending ? "animate-spin" : ""}`} />
+            Import Clients
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Imports ClickUp tracker rows into MTOS clients so ownership sync can match tasks.
+          </p>
         </div>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2">

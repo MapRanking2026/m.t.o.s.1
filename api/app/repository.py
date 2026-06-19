@@ -8,15 +8,25 @@ from app.models import (
     ClientIntelligenceSnapshot,
     ClientRecord,
     ClientWorkspace,
+    ClickUpClientImportResult,
     ClickUpIntegrationStatus,
     DashboardOverview,
     IntegrationConnectionStatus,
     MetricCard,
+    MonthlyTouchArtifact,
+    MonthlyTouchChecklistItem,
+    MonthlyTouchDetail,
     MonthlyTouchRecord,
+    MonthlyTouchWorkflowStep,
     OwnershipExceptionRecord,
     OwnershipSyncRunResult,
     OwnershipSyncSummary,
+    PromptActivationRequest,
     PromptTemplateRecord,
+    PromptTemplateDetail,
+    PromptVersionCreateRequest,
+    PromptVersionRecord,
+    PromptWorkflowAssignment,
     SyncCursorStatus,
     TenantContext,
     UserProfile,
@@ -89,6 +99,7 @@ class InMemoryMTOSRepository:
             MonthlyTouchRecord(
                 id="touch_1",
                 client_name="BluePeak Dental",
+                client_id="client_1",
                 scheduled_at="Jun 18 · 11:00 AM",
                 stage="Pre-Meeting Intelligence",
                 owner="Ariana Cole",
@@ -96,6 +107,7 @@ class InMemoryMTOSRepository:
             MonthlyTouchRecord(
                 id="touch_2",
                 client_name="Northwind Legal",
+                client_id="client_2",
                 scheduled_at="Jun 19 · 2:30 PM",
                 stage="Task Approval",
                 owner="Mila Grant",
@@ -103,6 +115,7 @@ class InMemoryMTOSRepository:
             MonthlyTouchRecord(
                 id="touch_3",
                 client_name="Harbor Ortho",
+                client_id="client_3",
                 scheduled_at="Jun 20 · 9:00 AM",
                 stage="QA Audit",
                 owner="Ariana Cole",
@@ -110,6 +123,7 @@ class InMemoryMTOSRepository:
             MonthlyTouchRecord(
                 id="touch_4",
                 client_name="Verdant Med Spa",
+                client_id="client_4",
                 scheduled_at="Jun 21 · 1:30 PM",
                 stage="Recap Approval",
                 owner="Leo Parker",
@@ -141,6 +155,46 @@ class InMemoryMTOSRepository:
                 provider="Mixed",
             ),
         ]
+        self._prompt_versions = {
+            "prompt_1": [
+                PromptVersionRecord(
+                    id="prompt_1_v11",
+                    version_number=11,
+                    system_prompt="You are Claude preparing a Monthly Touch brief for an existing client account. Focus on strategic clarity and concise prioritization.",
+                    user_prompt="Using the provided client context, produce: executive summary, top 3 wins, top 2 issues, campaign analysis, strategic recommendations, and suggested client questions.",
+                    is_active=False,
+                    created_at="2026-06-01T09:00:00Z",
+                ),
+                PromptVersionRecord(
+                    id="prompt_1_v12",
+                    version_number=12,
+                    system_prompt="You are Claude creating a Monthly Touch brief that helps an Account Manager prove value, reduce churn risk, and guide a strategic client conversation.",
+                    user_prompt="Generate a Monthly Touch Brief with executive summary, wins, issues, analysis, recommendations, and engagement questions. Tie every section to client value and next actions.",
+                    is_active=True,
+                    created_at="2026-06-14T09:00:00Z",
+                ),
+            ],
+            "prompt_2": [
+                PromptVersionRecord(
+                    id="prompt_2_v6",
+                    version_number=6,
+                    system_prompt="You turn meeting transcripts into department-ready task drafts without auto-submitting them.",
+                    user_prompt="Extract clear department tickets from the transcript, group them by team, and keep every item in draft status pending AM approval.",
+                    is_active=True,
+                    created_at="2026-06-10T09:00:00Z",
+                )
+            ],
+            "prompt_3": [
+                PromptVersionRecord(
+                    id="prompt_3_v4",
+                    version_number=4,
+                    system_prompt="You review account context for retention risk and expansion opportunity.",
+                    user_prompt="Summarize churn signals, missed opportunities, and the strongest strategic recommendation for the next Monthly Touch.",
+                    is_active=False,
+                    created_at="2026-06-12T09:00:00Z",
+                )
+            ],
+        }
         self._activity = [
             ActivityRecord(
                 id="activity_1",
@@ -351,6 +405,53 @@ class InMemoryMTOSRepository:
             return touches
         return [touch for touch in touches if touch.owner == context.current_user.full_name]
 
+    def get_monthly_touch_detail(self, context: TenantContext, touch_id: str) -> MonthlyTouchDetail:
+        touch = next((item for item in self.list_monthly_touches(context) if item.id == touch_id), None)
+        if touch is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monthly Touch not found")
+
+        client = next((item for item in self.list_clients(context) if item.id == touch.client_id), None)
+        if client is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+        steps = self._build_touch_workflow_steps(touch.stage)
+        checklist = self._build_meeting_checklist(touch.stage)
+
+        return MonthlyTouchDetail(
+            touch=touch.model_copy(),
+            account_health_score=client.health_score,
+            risk_level=client.risk_level,
+            executive_summary=(
+                f"{client.name} enters this Monthly Touch with a health score of {client.health_score}/100 and "
+                f"{client.risk_level.lower()} account risk. The meeting should prove progress, address current "
+                f"friction, and align the client around the next move in {client.top_opportunity.lower()}."
+            ),
+            top_wins=[
+                f"Momentum is visible around {client.top_opportunity.lower()}, giving the AM a concrete growth story to anchor.",
+                f"Ownership is assigned to {touch.owner}, so the meeting has a clear operator and follow-through path.",
+                f"The account already has a defined Monthly Touch slot at {touch.scheduled_at}, keeping cadence intact.",
+            ],
+            key_issues=[
+                f"{client.risk_level} risk means the meeting cannot stay tactical; it needs a clear value narrative.",
+                "Post-meeting outputs still require AM approval before deployment, so handoff speed matters.",
+            ],
+            strategic_recommendations=[
+                "Use the first five minutes to connect recent wins to business value, not just channel activity.",
+                f"Treat {client.top_opportunity.lower()} as the featured growth path and ask the client what would make it actionable this month.",
+                "Close with explicit owners, deadlines, and the next Monthly Touch date before ending the call.",
+            ],
+            suggested_questions=[
+                f"What outcome would make the next 30 days feel like a real step forward for {client.name}?",
+                "Which recent campaign change felt most valuable from the client side?",
+                "What friction is the client still feeling that the team may not see inside the tools?",
+            ],
+            workflow_steps=steps,
+            meeting_checklist=checklist,
+            generated_artifacts=self._build_generated_artifacts(touch.stage, client),
+            prompt_stack=self._build_prompt_stack(self.list_prompts()),
+            next_action=next(step.detail for step in steps if step.status == "current"),
+        )
+
     def get_client_workspace(self, context: TenantContext, client_id: str) -> ClientWorkspace:
         client = next((item for item in self.list_clients(context) if item.id == client_id), None)
         if client is None:
@@ -430,6 +531,64 @@ class InMemoryMTOSRepository:
     def list_prompts(self) -> list[PromptTemplateRecord]:
         return deepcopy(self._prompt_templates)
 
+    def get_prompt_detail(self, context: TenantContext, prompt_id: str) -> PromptTemplateDetail:
+        self._assert_admin(context)
+        template = next((item for item in self._prompt_templates if item.id == prompt_id), None)
+        if template is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt template not found")
+        versions = sorted(
+            deepcopy(self._prompt_versions.get(prompt_id, [])),
+            key=lambda item: item.version_number,
+            reverse=True,
+        )
+        active_version = next((item for item in versions if item.is_active), None)
+        return PromptTemplateDetail(
+            template=template.model_copy(),
+            active_version_id=active_version.id if active_version else None,
+            versions=versions,
+        )
+
+    def create_prompt_version(
+        self, context: TenantContext, prompt_id: str, payload: PromptVersionCreateRequest
+    ) -> PromptTemplateDetail:
+        self._assert_admin(context)
+        template = next((item for item in self._prompt_templates if item.id == prompt_id), None)
+        if template is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt template not found")
+        versions = self._prompt_versions.setdefault(prompt_id, [])
+        next_version_number = max((item.version_number for item in versions), default=0) + 1
+        versions.append(
+            PromptVersionRecord(
+                id=f"{prompt_id}_v{next_version_number}",
+                version_number=next_version_number,
+                system_prompt=payload.system_prompt,
+                user_prompt=payload.user_prompt,
+                is_active=False,
+                created_at=datetime.now(tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            )
+        )
+        template.version = f"v{next_version_number}"
+        template.status = "Draft"
+        return self.get_prompt_detail(context, prompt_id)
+
+    def activate_prompt_version(
+        self, context: TenantContext, prompt_id: str, payload: PromptActivationRequest
+    ) -> PromptTemplateDetail:
+        self._assert_admin(context)
+        template = next((item for item in self._prompt_templates if item.id == prompt_id), None)
+        if template is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt template not found")
+        versions = self._prompt_versions.get(prompt_id, [])
+        target = next((item for item in versions if item.id == payload.version_id), None)
+        if target is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt version not found")
+        self._prompt_versions[prompt_id] = [
+            item.model_copy(update={"is_active": item.id == payload.version_id}) for item in versions
+        ]
+        template.version = f"v{target.version_number}"
+        template.status = "Active"
+        return self.get_prompt_detail(context, prompt_id)
+
     def get_ownership_sync_summary(self, context: TenantContext) -> OwnershipSyncSummary:
         self._assert_admin(context)
         return self._sync_summary.model_copy()
@@ -437,6 +596,10 @@ class InMemoryMTOSRepository:
     def list_ownership_exceptions(self, context: TenantContext) -> list[OwnershipExceptionRecord]:
         self._assert_admin(context)
         return deepcopy(self._exceptions)
+
+    def import_clickup_clients(self, context: TenantContext) -> ClickUpClientImportResult:
+        self._assert_admin(context)
+        return ClickUpClientImportResult(status="completed", tasks_seen=0, clients_upserted=0)
 
     def get_clickup_integration_status(self, context: TenantContext) -> ClickUpIntegrationStatus:
         self._assert_admin(context)
@@ -471,6 +634,168 @@ class InMemoryMTOSRepository:
             status="completed",
             summary=self._sync_summary.model_copy(),
             exceptions=deepcopy(self._exceptions),
+        )
+
+    def _build_touch_workflow_steps(self, current_stage: str) -> list[MonthlyTouchWorkflowStep]:
+        sequence = [
+            ("context_collection", "Context Collection", "Gemini compiles account context from connected systems."),
+            ("brief_generation", "Brief Generation", "Claude turns the organized context into the Monthly Touch brief."),
+            ("live_meeting", "Monthly Touch Meeting", "The AM runs the meeting with the brief and checklist."),
+            ("meeting_analysis", "Meeting Analysis", "Claude reviews transcript, notes, and checklist completion."),
+            ("ticket_creation", "Ticket Creation", "Draft department tickets and deliverables are prepared for review."),
+            ("approval", "Approval", "The AM approves tickets, follow-up email, and action items."),
+            ("deployment", "Deployment", "Approved outputs are sent and internal records are updated."),
+        ]
+        stage_to_position = {
+            "Pre-Meeting Intelligence": 0,
+            "Meeting Scheduled": 1,
+            "Meeting Intelligence": 3,
+            "Task Approval": 4,
+            "Recap Approval": 5,
+            "QA Audit": 6,
+        }
+        current_index = stage_to_position.get(current_stage, 0)
+        steps: list[MonthlyTouchWorkflowStep] = []
+        for index, (step_id, label, detail) in enumerate(sequence):
+            status_value = "upcoming"
+            if index < current_index:
+                status_value = "complete"
+            elif index == current_index:
+                status_value = "current"
+            steps.append(
+                MonthlyTouchWorkflowStep(
+                    id=step_id,
+                    label=label,
+                    status=status_value,
+                    detail=detail,
+                )
+            )
+        return steps
+
+    def _build_meeting_checklist(self, current_stage: str) -> list[MonthlyTouchChecklistItem]:
+        done_cutoff = {
+            "Pre-Meeting Intelligence": 2,
+            "Meeting Scheduled": 3,
+            "Meeting Intelligence": 7,
+            "Task Approval": 9,
+            "Recap Approval": 10,
+            "QA Audit": 11,
+        }.get(current_stage, 2)
+        items = [
+            "Discussed 3 wins",
+            "Discussed 2 issues",
+            "Reviewed rankings and visibility",
+            "Reviewed website progress",
+            "Reviewed territory expansion",
+            "Reviewed calls and lead quality",
+            "Reviewed Google Ads performance",
+            "Asked strategic questions",
+            "Requested testimonial or referral opportunity",
+            "Drafted post-meeting actions",
+            "Prepared follow-up email",
+            "Scheduled next Monthly Touch",
+        ]
+        return [
+            MonthlyTouchChecklistItem(
+                id=f"checklist_{index + 1}",
+                label=label,
+                status="done" if index < done_cutoff else "pending",
+            )
+            for index, label in enumerate(items)
+        ]
+
+    def _build_generated_artifacts(self, current_stage: str, client: ClientRecord) -> list[MonthlyTouchArtifact]:
+        artifact_status = {
+            "Pre-Meeting Intelligence": ("ready", "in_progress", "pending_approval"),
+            "Meeting Scheduled": ("ready", "pending_approval", "pending_approval"),
+            "Meeting Intelligence": ("ready", "ready", "pending_approval"),
+            "Task Approval": ("ready", "ready", "pending_approval"),
+            "Recap Approval": ("ready", "ready", "pending_approval"),
+            "QA Audit": ("ready", "ready", "ready"),
+        }.get(current_stage, ("ready", "in_progress", "pending_approval"))
+        return [
+            MonthlyTouchArtifact(
+                id="brief",
+                label="Monthly Touch Brief",
+                status=artifact_status[0],
+                detail=f"Prepared around {client.top_opportunity.lower()} and current account health.",
+            ),
+            MonthlyTouchArtifact(
+                id="tickets",
+                label="Department Ticket Drafts",
+                status=artifact_status[1],
+                detail="Draft tasks are held for AM review before they are sent to ClickUp.",
+            ),
+            MonthlyTouchArtifact(
+                id="follow_up",
+                label="Post-Meeting Follow-Up",
+                status=artifact_status[2],
+                detail="Summary email and action items remain human-approved before deployment.",
+            ),
+        ]
+
+    def _build_prompt_stack(self, prompts: list[PromptTemplateRecord]) -> list[PromptWorkflowAssignment]:
+        return [
+            self._select_prompt_assignment(
+                prompts,
+                purpose="Brief Generation",
+                detail="Controls how Claude structures the Monthly Touch brief before the meeting.",
+                preferred_terms=["brief", "monthly touch"],
+            ),
+            self._select_prompt_assignment(
+                prompts,
+                purpose="Meeting Audit",
+                detail="Controls how Claude evaluates meeting quality, coaching gaps, and client intelligence after the call.",
+                preferred_terms=["audit", "retention"],
+            ),
+            self._select_prompt_assignment(
+                prompts,
+                purpose="Ticket Creation",
+                detail="Controls how follow-up tickets are drafted and prepared for AM approval.",
+                preferred_terms=["ticket", "follow-up"],
+            ),
+            self._select_prompt_assignment(
+                prompts,
+                purpose="Post-Meeting Email",
+                detail="Controls how the follow-up recap and next-step email are prepared for deployment.",
+                preferred_terms=["email", "follow-up", "recap"],
+            ),
+        ]
+
+    def _select_prompt_assignment(
+        self,
+        prompts: list[PromptTemplateRecord],
+        purpose: str,
+        detail: str,
+        preferred_terms: list[str],
+    ) -> PromptWorkflowAssignment:
+        matched = next(
+            (
+                prompt
+                for prompt in prompts
+                if any(term in f"{prompt.name} {prompt.category}".lower() for term in preferred_terms)
+            ),
+            None,
+        )
+        if matched is None:
+            return PromptWorkflowAssignment(
+                purpose=purpose,
+                template_id=None,
+                template_name="Not Configured",
+                version="—",
+                provider="Mixed",
+                status="missing",
+                detail=detail,
+            )
+        status_value = "active" if matched.status == "Active" else "fallback"
+        return PromptWorkflowAssignment(
+            purpose=purpose,
+            template_id=matched.id,
+            template_name=matched.name,
+            version=matched.version,
+            provider=matched.provider,
+            status=status_value,
+            detail=detail,
         )
 
     def _find_user(self, user_id: str) -> UserProfile:

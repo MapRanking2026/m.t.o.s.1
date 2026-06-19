@@ -47,6 +47,17 @@ def test_account_manager_can_view_assigned_client_workspace() -> None:
     assert payload["visibilityScope"].startswith("Ownership filtering")
 
 
+def test_account_manager_can_view_assigned_monthly_touch_detail() -> None:
+    response = client.get("/api/v1/monthly-touches/touch_2", headers=account_manager_headers)
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["touch"]["clientId"] == "client_2"
+    assert payload["touch"]["stage"] == "Task Approval"
+    assert len(payload["promptStack"]) >= 1
+    assert payload["nextAction"]
+
+
 def test_account_manager_cannot_view_unassigned_client_workspace() -> None:
     response = client.get("/api/v1/clients/client_1", headers=account_manager_headers)
     assert response.status_code == 404
@@ -76,6 +87,44 @@ def test_clickup_status_includes_connection_and_cursor_state() -> None:
     assert payload["connection"]["health"] == "connected"
     assert payload["ownershipCursor"]["status"] == "completed"
     assert payload["intelligenceCursor"]["status"] == "completed"
+
+
+def test_clickup_import_clients_endpoint() -> None:
+    response = client.post("/api/v1/integrations/clickup/import-clients", headers=admin_headers)
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["status"] == "completed"
+
+
+def test_admin_can_manage_prompt_versions() -> None:
+    detail_response = client.get("/api/v1/prompts/prompt_1", headers=admin_headers)
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["template"]["name"] == "Monthly Touch Brief Structure"
+
+    create_response = client.post(
+        "/api/v1/prompts/prompt_1/versions",
+        headers=admin_headers,
+        json={
+            "systemPrompt": "System prompt test",
+            "userPrompt": "User prompt test",
+        },
+    )
+    assert create_response.status_code == 200
+    create_payload = create_response.json()
+    newest_version = create_payload["versions"][0]
+    assert newest_version["systemPrompt"] == "System prompt test"
+    assert newest_version["isActive"] is False
+
+    activate_response = client.post(
+        "/api/v1/prompts/prompt_1/activate",
+        headers=admin_headers,
+        json={"versionId": newest_version["id"]},
+    )
+    assert activate_response.status_code == 200
+    activate_payload = activate_response.json()
+    assert activate_payload["activeVersionId"] == newest_version["id"]
 
 
 def test_ownership_exceptions_require_admin_access() -> None:

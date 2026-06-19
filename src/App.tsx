@@ -8,6 +8,7 @@ import ClientWorkspacePage from "@/pages/ClientWorkspacePage";
 import ClientsPage from "@/pages/ClientsPage";
 import DashboardPage from "@/pages/DashboardPage";
 import LoginPage from "@/pages/LoginPage";
+import MonthlyTouchDetailPage from "@/pages/MonthlyTouchDetailPage";
 import MonthlyTouchesPage from "@/pages/MonthlyTouchesPage";
 import PromptCenterPage from "@/pages/PromptCenterPage";
 import SettingsPage from "@/pages/SettingsPage";
@@ -29,6 +30,7 @@ function AuthenticatedApp() {
         <Route path="/clients" element={<ClientsPage />} />
         <Route path="/clients/:clientId" element={<ClientWorkspacePage />} />
         <Route path="/monthly-touches" element={<MonthlyTouchesPage />} />
+        <Route path="/monthly-touches/:touchId" element={<MonthlyTouchDetailPage />} />
         <Route path="/prompts" element={<PromptCenterPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>

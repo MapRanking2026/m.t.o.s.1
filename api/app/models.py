@@ -30,6 +30,10 @@ OwnershipExceptionStatus = Literal["open", "resolved"]
 IntelligenceSyncStatus = Literal["connected", "warning", "not_found"]
 IntegrationHealthStatus = Literal["connected", "warning", "not_configured"]
 SyncCursorState = Literal["idle", "running", "completed", "error"]
+WorkflowStepStatus = Literal["complete", "current", "upcoming"]
+ChecklistItemStatus = Literal["done", "pending"]
+ArtifactStatus = Literal["ready", "in_progress", "pending_approval"]
+PromptWorkflowStatus = Literal["active", "fallback", "missing"]
 
 
 class UserProfile(CamelModel):
@@ -60,9 +64,46 @@ class ClientRecord(CamelModel):
 class MonthlyTouchRecord(CamelModel):
     id: str
     client_name: str
+    client_id: str | None = None
     scheduled_at: str
     stage: TouchStage
     owner: str
+
+
+class MonthlyTouchWorkflowStep(CamelModel):
+    id: str
+    label: str
+    status: WorkflowStepStatus
+    detail: str
+
+
+class MonthlyTouchChecklistItem(CamelModel):
+    id: str
+    label: str
+    status: ChecklistItemStatus
+
+
+class MonthlyTouchArtifact(CamelModel):
+    id: str
+    label: str
+    status: ArtifactStatus
+    detail: str
+
+
+class MonthlyTouchDetail(CamelModel):
+    touch: MonthlyTouchRecord
+    account_health_score: int
+    risk_level: RiskLevel
+    executive_summary: str
+    top_wins: list[str]
+    key_issues: list[str]
+    strategic_recommendations: list[str]
+    suggested_questions: list[str]
+    workflow_steps: list[MonthlyTouchWorkflowStep]
+    meeting_checklist: list[MonthlyTouchChecklistItem]
+    generated_artifacts: list[MonthlyTouchArtifact]
+    prompt_stack: list["PromptWorkflowAssignment"]
+    next_action: str
 
 
 class PromptTemplateRecord(CamelModel):
@@ -72,6 +113,40 @@ class PromptTemplateRecord(CamelModel):
     version: str
     status: PromptStatus
     provider: ProviderName
+
+
+class PromptVersionRecord(CamelModel):
+    id: str
+    version_number: int
+    system_prompt: str
+    user_prompt: str
+    is_active: bool
+    created_at: str
+
+
+class PromptTemplateDetail(CamelModel):
+    template: PromptTemplateRecord
+    active_version_id: str | None = None
+    versions: list[PromptVersionRecord]
+
+
+class PromptVersionCreateRequest(CamelModel):
+    system_prompt: str
+    user_prompt: str
+
+
+class PromptActivationRequest(CamelModel):
+    version_id: str
+
+
+class PromptWorkflowAssignment(CamelModel):
+    purpose: str
+    template_id: str | None = None
+    template_name: str
+    version: str
+    provider: ProviderName
+    status: PromptWorkflowStatus
+    detail: str
 
 
 class ActivityRecord(CamelModel):
@@ -138,6 +213,12 @@ class SyncCursorStatus(CamelModel):
     records_seen: int = 0
     records_processed: int = 0
     last_error: str | None = None
+
+
+class ClickUpClientImportResult(CamelModel):
+    status: Literal["completed"]
+    tasks_seen: int
+    clients_upserted: int
 
 
 class TenantContext(CamelModel):
